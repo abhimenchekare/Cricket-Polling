@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#050b1c" />
+<title>Vote recorded · Cricket Auction</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏏</text></svg>" />
+<link rel="stylesheet" href="/css/theme.css" />
+<link rel="stylesheet" href="/css/participant.css" />
+</head>
+<body>
+<div class="page confirm-page">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">🏏</div>
+      <div class="brand-text">
+        <div class="brand-title" data-event-name>Cricket Auction Live Polls</div>
+        <div class="brand-sub" data-event-tagline>Office Cricket Auction</div>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="card card-hero confirm-card" id="confirm-card">
+      <div id="confirm-content">
+        <div class="check-ring">
+          <svg viewBox="0 0 24 24"><path d="M4 12.5l5.2 5.2L20 6.8"/></svg>
+        </div>
+        <h1 class="confirm-title">Vote recorded!</h1>
+        <p class="muted" style="font-size:14.5px">Thanks for taking part. Your answer is locked in — one vote per poll.</p>
+        <div id="choice" style="margin-top:6px"></div>
+      </div>
+
+      <div class="stat-grid" style="margin-top:24px" id="confirm-stats"></div>
+
+      <div class="confirm-actions">
+        <a class="btn btn-ghost btn-lg" href="/poll">← Back to polls</a>
+        <a class="btn btn-primary btn-lg" id="results-link" href="/results">See results</a>
+      </div>
+
+      <p class="mute-sm" id="confirm-note" style="margin-top:16px"></p>
+    </section>
+
+    <p class="mute-sm center" style="margin-top:18px">Cricket Auction Live Polls</p>
+  </main>
+</div>
+
+<script src="/js/app.js"></script>
+<script src="/js/confirm.js"></script>
+</body>
+</html>

@@ -1,0 +1,407 @@
+/* Admin dashboard */
+(function () {
+  'use strict';
+  const { API, toast, escapeHtml, confirmDialog, setBusy, formatDate, timeAgo } = window.App;
+  const UI = window.AdminPollUI;
+
+  const els = {
+    kpis: document.getElementById('dash-kpis'),
+    live: document.getElementById('live-control'),
+    results: document.getElementById('dash-results'),
+    queue: document.getElementById('dash-queue'),
+    quick: document.getElementById('dash-quick'),
+    activity: document.getElementById('dash-activity')
+  };
+
+  let tickOffset = 0;
+
+  /* ------------------------------ rendering ------------------------------ */
+
+  function render(state) {
+    tickOffset = state.serverTime - Date.now();
+    renderKpis(state);
+    renderLive(state);
+    renderResults(state);
+    renderQueue(state);
+    renderQuick(state);
+    renderActivity(state);
+    UI.animateBars(document);
+  }
+
+  function renderKpis(state) {
+    const live = state.polls.find((p) => p.status === 'active');
+    const s = state.stats;
+    els.kpis.innerHTML = `
+      <div class="kpi"><div class="kpi-value">${s.participants}</div><div class="kpi-label">Participants</div></div>
+      <div class="kpi gold"><div class="kpi-value">${s.totalVotes}</div><div class="kpi-label">Votes cast</div></div>
+      <div class="kpi"><div class="kpi-value">${s.onlineParticipants}</div><div class="kpi-label">Online now</div></div>
+      <div class="kpi"><div class="kpi-value">${live ? (live.totalVotes) : '—'}</div><div class="kpi-label">${live ? 'Votes on live poll' : 'No live poll'}</div></div>
+    `;
+  }
+
+  function renderLive(state) {
+    const live = state.polls.find((p) => p.status === 'active') || state.polls.find((p) => p.status === 'paused');
+    if (!live) {
+      const nextDraft = state.polls.filter((p) => p.status === 'draft').slice(-1)[0];
+      els.live.innerHTML = `
+        <div class="card card-hero">
+          <div class="card-head">
+            <div>
+              <div class="eyebrow">Live control</div>
+              <div class="card-title" style="margin-top:4px">No poll is running</div>
+            </div>
+            <span class="pill pill-draft">IDLE</span>
+          </div>
+          <p class="muted" style="font-size:14px">
+            ${nextDraft ? 'Start your next poll whenever the room is ready.' : 'Create a poll to get started.'}
+          </p>
+          <div class="poll-actions" style="margin-top:14px">
+            ${nextDraft ? `<button class="btn btn-primary" data-start="${nextDraft.id}">▶ Start: ${escapeHtml(nextDraft.question.slice(0, 38))}${nextDraft.question.length > 38 ? '…' : ''}</button>` : ''}
+            <a class="btn btn-ghost" href="/admin/polls">+ New poll</a>
+            <a class="btn btn-ghost" href="/display" target="_blank" rel="noopener">🖥 Big screen</a>
+          </div>
+        </div>`;
+      els.live.querySelectorAll('[data-start]').forEach((btn) =>
+        btn.addEventListener('click', () => UI.handleAction('start', btn.dataset.start))
+      );
+      return;
+    }
+
+    const isPaused = live.status === 'paused';
+    els.live.innerHTML = `
+      <div class="card card-hero">
+        <div class="card-head">
+          <div>
+            <div class="eyebrow">Live control</div>
+            <div class="card-title" style="margin-top:4px;font-size:19px;line-height:1.25">${escapeHtml(live.question)}</div>
+          </div>
+          ${isPaused ? '<span class="pill pill-paused">PAUSED</span>' : '<span class="pill pill-live"><span class="dot"></span>LIVE</span>'}
+        </div>
+        <div class="row" style="gap:12px;flex-wrap:wrap;margin-bottom:14px">
+          <div class="timer" id="admin-timer" style="font-size:22px">
+            <div class="timer-ring" id="admin-ring" style="--pct:100"><span>⏱</span></div>
+            <span id="admin-timer-text">--:--</span>
+          </div>
+          <div class="vote-count">🗳️ <strong>${live.totalVotes}</strong> votes</div>
+          <div class="vote-count">👥 <strong>${state.stats.participants}</strong> participants</div>
+        </div>
+        <div class="poll-actions">${UI.controlButtons(live)}</div>
+        <hr class="divider" />
+        <div class="row-between" style="flex-wrap:wrap;gap:10px">
+          <div class="mute-sm">Results visibility</div>
+          <div class="segmented" style="max-width:330px;flex:1 1 240px">
+            <button data-id="${live.id}" data-visibility="never" class="${live.showResults === 'never' ? 'active' : ''}">Private</button>
+            <button data-id="${live.id}" data-visibility="during" class="${live.showResults === 'during' ? 'active' : ''}">Live</button>
+            <button data-id="${live.id}" data-visibility="after" class="${live.showResults === 'after' ? 'active' : ''}">After close</button>
+          </div>
+        </div>
+        <div class="row" style="gap:8px;margin-top:14px;flex-wrap:wrap">
+          <span class="mute-sm">Restart countdown:</span>
+          ${[10, 15, 20, 30, 45, 60, 90, 120]
+            .map((s) => `<button class="btn btn-ghost btn-sm" data-timer="${s}" data-id="${live.id}" title="Restart the countdown with ${s}s">↻ ${s < 60 ? s + 's' : s / 60 + 'm'}</button>`)
+            .join('')}
+          <button class="btn btn-ghost btn-sm" data-extend="10" data-id="${live.id}" title="Add 10 seconds">+10s</button>
+          <button class="btn btn-ghost btn-sm" data-extend="30" data-id="${live.id}" title="Add 30 seconds">+30s</button>
+          <button class="btn btn-ghost btn-sm" data-timer="0" data-id="${live.id}" title="Remove the countdown">No limit</button>
+        </div>
+      </div>`;
+
+    UI.bindActions(els.live, { onEdit: openEditor });
+    els.live.querySelectorAll('[data-timer]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const seconds = Number(btn.dataset.timer);
+        try {
+          await API.post(`/api/admin/polls/${btn.dataset.id}/timer`, { seconds, mode: 'set' });
+          toast(seconds ? `Countdown restarted at ${seconds}s` : 'Countdown removed', 'ok');
+          window.AdminShell.poke();
+        } catch (err) {
+          toast(err.message, 'err');
+        }
+      });
+    });
+    els.live.querySelectorAll('[data-extend]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const seconds = Number(btn.dataset.extend);
+        try {
+          await API.post(`/api/admin/polls/${btn.dataset.id}/timer`, { seconds, mode: 'extend' });
+          toast(`Added ${seconds}s`, 'ok');
+          window.AdminShell.poke();
+        } catch (err) {
+          toast(err.message, 'err');
+        }
+      });
+    });
+    tickTimer();
+  }
+
+  function tickTimer() {
+    const textEl = document.getElementById('admin-timer-text');
+    const ringEl = document.getElementById('admin-ring');
+    const timerEl = document.getElementById('admin-timer');
+    if (!textEl || !ringEl) return;
+    const state = window.AdminShell.state;
+    const live = state?.polls.find((p) => p.status === 'active') || state?.polls.find((p) => p.status === 'paused');
+    if (!live) return;
+    if (live.status === 'paused') {
+      textEl.textContent = 'Paused';
+      timerEl.classList.add('is-urgent');
+      return;
+    }
+    if (!live.endsAt) {
+      textEl.textContent = 'No limit';
+      ringEl.style.setProperty('--pct', 100);
+      return;
+    }
+    const remaining = Math.max(0, live.endsAt - (Date.now() + tickOffset));
+    textEl.textContent = window.App.formatClock(remaining);
+    const total = Math.max(1, live.endsAt - (live.startedAt || live.endsAt - live.timerSeconds * 1000));
+    ringEl.style.setProperty('--pct', ((remaining / total) * 100).toFixed(1));
+    timerEl.classList.toggle('is-urgent', remaining <= 10_000);
+  }
+  setInterval(tickTimer, 300);
+
+  function renderResults(state) {
+    // Prefer the live poll, then a paused one, then the most recently closed
+    const live = state.polls.find((p) => p.status === 'active') || state.polls.find((p) => p.status === 'paused') || state.polls.find((p) => p.status === 'closed');
+    if (!live) {
+      els.results.innerHTML = `<div class="card"><div class="card-head"><div><div class="eyebrow">Results</div><div class="card-title" style="margin-top:4px">Nothing to show</div></div></div><div class="empty">Start a poll to see live results.</div></div>`;
+      return;
+    }
+    els.results.innerHTML = `
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="eyebrow">${live.status === 'closed' ? 'Final result' : 'Live result'}</div>
+            <div class="card-title" style="margin-top:4px">${escapeHtml(live.question)}</div>
+          </div>
+          <span class="pill pill-ghost">${live.totalVotes} votes</span>
+        </div>
+        <div class="results">${UI.resultsHtml(live.results, { max: 10 })}</div>
+        <div class="row" style="gap:8px;margin-top:14px;flex-wrap:wrap">
+          <a class="btn btn-ghost btn-sm" href="/admin/history">Full report</a>
+          <button class="btn btn-ghost btn-sm" data-id="${live.id}" data-poll-act="export">⬇ Export CSV</button>
+          <span class="mute-sm" style="margin-left:auto">Updated live</span>
+        </div>
+      </div>`;
+    UI.bindActions(els.results);
+  }
+
+  function renderQueue(state) {
+    const drafts = state.polls.filter((p) => p.status === 'draft').slice(0, 4);
+    const recent = state.polls.filter((p) => p.status === 'closed').slice(0, 3);
+    els.queue.innerHTML = `
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="eyebrow">Queue</div>
+            <div class="card-title" style="margin-top:4px">Ready to run (${state.polls.filter((p) => p.status === 'draft').length})</div>
+          </div>
+          <a class="btn btn-ghost btn-sm" href="/admin/polls">Manage</a>
+        </div>
+        ${drafts.length
+          ? drafts
+              .map(
+                (p) => `
+          <div class="poll-item">
+            <div class="poll-item-q" style="font-size:14.5px;margin-bottom:8px">${escapeHtml(p.question)}</div>
+            <div class="poll-item-meta">${UI.metaChips(p)}</div>
+            <div class="poll-actions">
+              <button class="btn btn-primary" data-start="${p.id}">▶ Start</button>
+              <a class="btn btn-ghost" href="/admin/polls?edit=${p.id}">✏️ Edit</a>
+            </div>
+          </div>`
+              )
+              .join('')
+          : '<div class="empty">No draft polls. Create one to get ready.</div>'}
+        <hr class="divider" />
+        <div class="mute-sm" style="margin-bottom:8px">Recently closed</div>
+        ${recent.length
+          ? recent
+              .map(
+                (p) => `<div class="row-between" style="padding:7px 0;font-size:13px">
+                  <span class="truncate" style="color:var(--text-dim)">${escapeHtml(p.question)}</span>
+                  <span class="pill pill-ghost">${p.totalVotes}</span>
+                </div>`
+              )
+              .join('')
+          : '<div class="mute-sm">No closed polls yet.</div>'}
+      </div>`;
+    els.queue.querySelectorAll('[data-start]').forEach((btn) =>
+      btn.addEventListener('click', () => UI.handleAction('start', btn.dataset.start))
+    );
+  }
+
+  function renderQuick(state) {
+    els.quick.innerHTML = `
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="eyebrow">Quick actions</div>
+            <div class="card-title" style="margin-top:4px">Run the room</div>
+          </div>
+        </div>
+        <div class="grid-3">
+          <a class="btn btn-primary" href="/admin/polls">+ Create poll</a>
+          <a class="btn btn-ghost" href="/display" target="_blank" rel="noopener">🖥 Big screen</a>
+          <button class="btn btn-ghost" id="show-qr">🔗 Join link</button>
+          <a class="btn btn-ghost" href="/admin/participants">👥 Participants</a>
+          <button class="btn btn-ghost" id="event-settings">⚙️ Event settings</button>
+          <button class="btn btn-ghost" id="change-password">🔑 Password</button>
+        </div>
+      </div>`;
+    document.getElementById('show-qr').addEventListener('click', showShareModal);
+    document.getElementById('event-settings').addEventListener('click', showSettingsModal);
+    document.getElementById('change-password').addEventListener('click', showPasswordModal);
+  }
+
+  function renderActivity(state) {
+    if (!state.recentActivity.length) {
+      els.activity.innerHTML = '<div class="empty">No activity yet.</div>';
+      return;
+    }
+    els.activity.innerHTML = state.recentActivity
+      .map(
+        (a) => `
+      <div class="act-item">
+        <div class="act-dot"></div>
+        <div class="grow">
+          <div style="color:var(--text)">${escapeHtml(a.detail || a.action)}</div>
+          <div class="mute-sm">${escapeHtml(a.action)} · ${escapeHtml(a.actor || 'system')}</div>
+        </div>
+        <div class="act-time">${timeAgo(a.created_at)}</div>
+      </div>`
+      )
+      .join('');
+  }
+
+  /* ------------------------------- modals ------------------------------- */
+
+  function buildModal(inner, { wide = false } = {}) {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop';
+    backdrop.innerHTML = `<div class="modal" style="${wide ? 'width:min(100%,680px)' : ''}">${inner}</div>`;
+    document.body.appendChild(backdrop);
+    const close = () => backdrop.remove();
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop || e.target.closest('[data-close]')) close();
+    });
+    document.addEventListener('keydown', function onKey(e) {
+      if (e.key === 'Escape') {
+        close();
+        document.removeEventListener('keydown', onKey);
+      }
+    });
+    return { backdrop, close };
+  }
+
+  async function showShareModal() {
+    const { backdrop } = buildModal(
+      `<div class="modal-title">Share the join link</div>
+       <div class="modal-body">Everyone opens this link on their phone — no app install needed.
+         Paste it in your team chat, WhatsApp group or email.</div>
+       <div class="center" id="share-holder" style="font-family:var(--font-num);font-size:14px;color:var(--green-400);word-break:break-all;padding:14px;border-radius:14px;background:rgba(4,10,24,.7);border:1px solid var(--card-border)">Loading…</div>
+       <div class="modal-actions" style="margin-top:18px">
+         <button class="btn btn-ghost" data-close>Close</button>
+         <button class="btn btn-primary" id="copy-share">Copy link</button>
+       </div>
+       <div class="center" style="margin-top:12px">
+         <a class="btn-link" href="/display" target="_blank" rel="noopener">Open the big screen instead →</a>
+       </div>`
+    );
+    let joinUrl = '';
+    try {
+      const meta = await API.get('/api/meta');
+      joinUrl = meta.join.joinUrl;
+      backdrop.querySelector('#share-holder').textContent = joinUrl;
+    } catch {
+      backdrop.querySelector('#share-holder').textContent = 'Could not load the link';
+    }
+    backdrop.querySelector('#copy-share').addEventListener('click', async () => {
+      const ok = await window.App.copyText(joinUrl);
+      toast(ok ? 'Link copied' : joinUrl, ok ? 'ok' : 'info', 4000);
+    });
+  }
+
+  async function showSettingsModal() {
+    let settings = window.AdminShell.state?.settings || {};
+    const { backdrop } = buildModal(
+      `<div class="modal-title">Event settings</div>
+       <div class="modal-body">These appear on the join page and the big screen.</div>
+       <div class="stack">
+         <label class="field"><span class="label">Event name</span><input class="input" id="s-name" value="${escapeHtml(settings.event_name || '')}" maxlength="80" /></label>
+         <label class="field"><span class="label">Tagline</span><input class="input" id="s-tag" value="${escapeHtml(settings.event_tagline || '')}" maxlength="80" /></label>
+         <label class="field"><span class="label">Big-screen message (idle)</span><textarea class="textarea" id="s-msg" maxlength="240">${escapeHtml(settings.display_message || '')}</textarea></label>
+         <label class="switch"><input type="checkbox" id="s-code-req" ${settings.join_requires_code === '1' ? 'checked' : ''} /><span class="switch-track"></span><span class="switch-text"><span class="switch-title">Require an access code to join</span><span class="switch-sub">Only people with the event code can vote</span></span></label>
+         <label class="field"><span class="label">Access code</span><input class="input" id="s-code" value="${escapeHtml(settings.access_code || '')}" maxlength="32" /></label>
+         <label class="switch"><input type="checkbox" id="s-allow" ${settings.allow_new_participants === '1' ? 'checked' : ''} /><span class="switch-track"></span><span class="switch-text"><span class="switch-title">Allow new participants to join</span><span class="switch-sub">Turn off once everyone is in</span></span></label>
+       </div>
+       <div class="modal-actions" style="margin-top:18px">
+         <button class="btn btn-ghost" data-close>Cancel</button>
+         <button class="btn btn-primary" id="save-settings">Save settings</button>
+       </div>`,
+      { wide: true }
+    );
+    backdrop.querySelector('#save-settings').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      setBusy(btn, true, 'Saving…');
+      try {
+        await API.put('/api/admin/settings', {
+          event_name: backdrop.querySelector('#s-name').value.trim(),
+          event_tagline: backdrop.querySelector('#s-tag').value.trim(),
+          display_message: backdrop.querySelector('#s-msg').value.trim(),
+          join_requires_code: backdrop.querySelector('#s-code-req').checked,
+          access_code: backdrop.querySelector('#s-code').value.trim(),
+          allow_new_participants: backdrop.querySelector('#s-allow').checked
+        });
+        toast('Settings saved', 'ok');
+        backdrop.remove();
+        await window.AdminShell.refresh();
+      } catch (err) {
+        setBusy(btn, false);
+        toast(err.message, 'err');
+      }
+    });
+  }
+
+  function showPasswordModal() {
+    const { backdrop } = buildModal(
+      `<div class="modal-title">Change admin password</div>
+       <div class="modal-body">Use at least 6 characters. You'll stay signed in on this device.</div>
+       <div class="stack">
+         <label class="field"><span class="label">Current password</span><input class="input" type="password" id="pw-current" autocomplete="current-password" /></label>
+         <label class="field"><span class="label">New password</span><input class="input" type="password" id="pw-new" autocomplete="new-password" /></label>
+         <label class="field"><span class="label">Confirm new password</span><input class="input" type="password" id="pw-confirm" autocomplete="new-password" /></label>
+       </div>
+       <div class="modal-actions" style="margin-top:18px">
+         <button class="btn btn-ghost" data-close>Cancel</button>
+         <button class="btn btn-primary" id="save-pw">Update password</button>
+       </div>`
+    );
+    backdrop.querySelector('#save-pw').addEventListener('click', async (e) => {
+      const current = backdrop.querySelector('#pw-current').value;
+      const next = backdrop.querySelector('#pw-new').value;
+      const confirm = backdrop.querySelector('#pw-confirm').value;
+      if (next !== confirm) return toast('New passwords do not match', 'err');
+      setBusy(e.currentTarget, true, 'Saving…');
+      try {
+        await API.post('/api/admin/password', { currentPassword: current, newPassword: next });
+        toast('Password updated', 'ok');
+        document.getElementById('password-banner')?.classList.add('hidden');
+        backdrop.remove();
+      } catch (err) {
+        setBusy(e.currentTarget, false);
+        toast(err.message, 'err');
+      }
+    });
+  }
+
+  function openEditor(poll) {
+    window.location.href = `/admin/polls?edit=${poll.id}`;
+  }
+
+  document.getElementById('open-password')?.addEventListener('click', showPasswordModal);
+
+  window.AdminShell.ready.then(() => {
+    window.AdminShell.onChange(render);
+  });
+})();
