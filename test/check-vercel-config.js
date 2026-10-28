@@ -46,6 +46,19 @@ if (config) {
   ok('function maxDuration is set', Boolean(config.functions?.['api/index.js']?.maxDuration));
   ok('cleanUrls enabled', config.cleanUrls === true);
   ok(
+    'static pages are pinned to outputDirectory "public"',
+    config.outputDirectory === 'public' && fs.existsSync(path.join(ROOT, 'public', 'index.html'))
+  );
+  // Vercel must be told this is a static build; otherwise it hunts for a Node server
+  // entrypoint (index.js/server.js/app.js) and fails with "No entrypoint found".
+  ok('explicit buildCommand set (blocks Node-entrypoint detection)', typeof config.buildCommand === 'string' && config.buildCommand.length > 0);
+  ok(
+    'buildCommand points at an existing script',
+    !!JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).scripts['vercel-build'] &&
+      fs.existsSync(path.join(ROOT, 'scripts', 'vercel-build.js'))
+  );
+  ok('no "builds" array alongside outputDirectory (they conflict)', !Array.isArray(config.builds));
+  ok(
     'all /api traffic is rewritten to the function',
     (config.rewrites || []).some((r) => r.source === '/api/(.*)' && r.destination === '/api/index')
   );

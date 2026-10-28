@@ -28,6 +28,11 @@ Everything else is the same feature set: 10 pages, admin panel, one vote per per
 
 ## 2. Deploy in ~10 minutes (free)
 
+> 📘 **New to Vercel?** Follow `DEPLOY-STEP-BY-STEP.md` — it walks through every click, including the
+> exact answer to "do I need an external database?" (short version: yes, a free hosted Postgres;
+> Vercel's own Storage → Neon option creates it from the dashboard and wires `DATABASE_URL` for you).
+
+
 ### Step 1 — Create a free Postgres database (Neon)
 
 1. Go to **https://neon.tech** → sign up (free, no card).
