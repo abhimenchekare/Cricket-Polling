@@ -120,6 +120,35 @@ When a countdown reaches zero the poll closes automatically: further votes are r
 
 ---
 
+## 4b. ⚡ Rapid round — "who gets bid next?" in 10–15 seconds
+
+The auction runs for hours, so the fastest engagement loop should be one tap:
+
+1. Admin dashboard → **Rapid round** card (above Quick actions).
+2. Question + one player per line as options (remembered in your browser, so round 2 is instant).
+3. Pick the countdown: **10s / 15s / 20s / 30s / 45s / 60s**.
+4. **Create & start round** — created, made live and the clock starts in a single action.
+
+Participants' phones switch to the new question within ~3 s, voting locks the moment the clock hits
+zero, and the result appears on every screen (phones + projector) automatically — no second click.
+Press the same button again for the next player.
+
+Countdowns under a minute show as plain seconds (`15s`, `8s`); longer ones stay `mm:ss`.
+
+## 4c. Admin panel bouncing to the login page — fixed
+
+The old behaviour: one failed request (database waking up, network blip) answered `401`, the shell
+read that as "signed out" and redirected to the login page, dumping whatever you had just clicked.
+
+Now:
+
+- The database layer **retries once** on connection-level errors — Neon suspends idle databases, so
+  the first click after a quiet spell can fail, and this absorbs it.
+- If identity can't be verified the API answers **503 + retry**, never `401`. A 503 cannot log you out.
+- Any stray `401` triggers one silent re-check; only if that also fails does a red **Reconnect**
+  banner appear — page, modal and typing stay exactly where they were.
+- A genuine expiry lands on the login page with an explanation instead of a blind redirect.
+
 ## 5. Pages
 
 | Page | URL |
