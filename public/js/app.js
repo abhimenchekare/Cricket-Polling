@@ -28,6 +28,15 @@
       const err = new Error((data && data.error) || `Request failed (${res.status})`);
       err.status = res.status;
       err.data = data;
+      // Any 401 means the session may be gone. Panels listen for this instead of each
+      // caller guessing — one lost request must never strand a half-finished admin action.
+      if (res.status === 401 && !/\/api\/(admin\/)?login$/.test(url)) {
+        try {
+          window.dispatchEvent(new CustomEvent('app:unauthorized', { detail: { url } }));
+        } catch {
+          /* ignore */
+        }
+      }
       throw err;
     }
     return data;
@@ -185,6 +194,8 @@
 
   function formatClock(ms) {
     const total = Math.max(0, Math.ceil(ms / 1000));
+    // Short rounds (10-15 s guessing rounds) read best as plain seconds.
+    if (total < 60) return `${total}s`;
     const m = Math.floor(total / 60);
     const s = total % 60;
     return `${pad(m)}:${pad(s)}`;

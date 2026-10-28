@@ -367,6 +367,57 @@ async function main() {
   ok('each participant gets their own vote state', !!bobState2.poll?.viewer && !!aliceState2.poll?.viewer);
   ok('anonymous flag does not leak voter identity', !JSON.stringify(bobState2.poll).includes('participantId'));
 
+  /* 14b. Rapid round (10-15 s guessing) — the flow the admin uses during the auction */
+  section('Rapid round (seconds-based guessing)');
+  const rr = await admin.post('/api/admin/polls', {
+    question: `Who wins the bid for player E2E-${Date.now()}?`,
+    category: 'Rapid round',
+    showResults: 'after',
+    anonymous: false,
+    timerSeconds: 15,
+    options: [{ label: 'Team A' }, { label: 'Team B' }, { label: 'Team C' }]
+  });
+  ok('rapid round poll created', rr.status === 201, `status ${rr.status}`);
+  const rrId = rr.data.poll.id;
+  ok('accepts a 15-second timer', rr.data.poll.timerSeconds === 15, String(rr.data.poll.timerSeconds));
+
+  const rrStart = await admin.post(`/api/admin/polls/${rrId}/action`, { action: 'start', timerSeconds: 15 });
+  ok('rapid round starts immediately', rrStart.status === 200, `status ${rrStart.status}`);
+  let rrState = (await bob.get('/api/state')).data.poll;
+  ok('participants see the rapid round', rrState && rrState.id === rrId);
+  ok('countdown is ~15s', rrState.remainingMs > 12_000 && rrState.remainingMs <= 15_000, String(rrState.remainingMs));
+  ok('results hidden while guessing', rrState.resultsVisible === false);
+
+  // fresh clients: earlier sections deliberately invalidate some sessions
+  const rrA = new Client('rapid-a');
+  const rrB = new Client('rapid-b');
+  await rrA.post('/api/join', { name: 'Rapid A', employeeId: `E2E-RR-A-${rrId}` });
+  await rrB.post('/api/join', { name: 'Rapid B', employeeId: `E2E-RR-B-${rrId}` });
+  const rrVoteA = await rrA.post('/api/vote', { pollId: rrId, optionId: rrState.options[0].id });
+  const rrVoteB = await rrB.post('/api/vote', { pollId: rrId, optionId: rrState.options[1].id });
+  ok(
+    'participants can vote in the rapid round',
+    rrVoteA.status === 200 && rrVoteB.status === 200,
+    `A ${rrVoteA.status} ${JSON.stringify(rrVoteA.data)} / B ${rrVoteB.status} ${JSON.stringify(rrVoteB.data)}`
+  );
+
+  const rrTimer = await admin.post(`/api/admin/polls/${rrId}/timer`, { seconds: 10, mode: 'set' });
+  ok('countdown can be reset to 10s', rrTimer.status === 200, `status ${rrTimer.status}`);
+  rrState = (await rrA.get('/api/state')).data.poll;
+  ok('10s countdown accepted', rrState.remainingMs <= 10_000 && rrState.remainingMs > 8000, String(rrState.remainingMs));
+
+  // close it as the timer would, and confirm the answer appears automatically
+  await admin.post(`/api/admin/polls/${rrId}/action`, { action: 'close' });
+  const rrAfter = (await rrA.get('/api/state')).data;
+  const rrClosed = rrAfter.history.find((h) => h.id === rrId);
+  ok('results auto-reveal once the round closes', !!rrClosed && rrClosed.resultsVisible === true);
+  ok('rapid round keeps its votes', !!rrClosed && rrClosed.totalVotes === 2, String(rrClosed && rrClosed.totalVotes));
+  ok(
+    'winning option has the most votes',
+    !!rrClosed && rrClosed.results.rows.length === 3 && rrClosed.results.totalVotes === 2
+  );
+  await admin.del(`/api/admin/polls/${rrId}`);
+
   /* 15. Persistence */
   section('Data persistence');
   const persisted = await admin.get('/api/admin/state');

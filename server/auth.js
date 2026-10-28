@@ -2,7 +2,7 @@
 
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
-const { q, one } = require('./db');
+const { q, one, isTransient } = require('./db');
 
 const ADMIN_COOKIE = 'cp_admin';
 const PARTICIPANT_COOKIE = 'cp_participant';
@@ -132,19 +132,39 @@ async function isDefaultPassword(adminId) {
 /* ------------------------------- middleware ------------------------------ */
 
 async function attachIdentity(req, res, next) {
+  // If the identity lookup itself fails (Neon waking up, connection limit, cold start),
+  // we must NOT treat the user as "signed out" — that logs the admin out on a random
+  // button click. Mark the request as "identity unknown" so routes can answer 503 + retry.
+  req.identityUnknown = false;
   try {
     req.participant = await getParticipantByToken(req.cookies?.[PARTICIPANT_COOKIE]);
-    req.admin = await getAdminByToken(req.cookies?.[ADMIN_COOKIE]);
-    if (req.cookies?.[PARTICIPANT_COOKIE] && !req.participant) {
-      res.clearCookie(PARTICIPANT_COOKIE, { path: '/' });
-    }
   } catch (err) {
-    console.error('[auth] identity lookup failed', err.message);
+    console.error('[auth] participant lookup failed:', err.message);
+    if (isTransient(err)) req.identityUnknown = true;
+  }
+  try {
+    req.admin = await getAdminByToken(req.cookies?.[ADMIN_COOKIE]);
+  } catch (err) {
+    console.error('[auth] admin lookup failed:', err.message);
+    if (isTransient(err)) req.identityUnknown = true;
+  }
+  if (req.cookies?.[PARTICIPANT_COOKIE] && !req.participant && !req.identityUnknown) {
+    res.clearCookie(PARTICIPANT_COOKIE, { path: '/' });
   }
   next();
 }
 
+/** 503 the client can safely retry — never a 401 (which means "you are logged out"). */
+function retryable(res, what) {
+  res.set('Retry-After', '2');
+  return res.status(503).json({
+    error: `Server is waking up the database (${what}). Retrying…`,
+    retry: true
+  });
+}
+
 function requireParticipant(req, res, next) {
+  if (!req.participant && req.identityUnknown) return retryable(res, 'participant session');
   if (!req.participant) return res.status(401).json({ error: 'Please join the poll first' });
   if (Number(req.participant.blocked)) {
     return res.status(403).json({ error: 'Your participation has been disabled by the host' });
@@ -153,6 +173,7 @@ function requireParticipant(req, res, next) {
 }
 
 function requireAdmin(req, res, next) {
+  if (!req.admin && req.identityUnknown) return retryable(res, 'admin session');
   if (!req.admin) return res.status(401).json({ error: 'Admin login required' });
   next();
 }
@@ -170,6 +191,7 @@ module.exports = {
   changeAdminPassword,
   isDefaultPassword,
   attachIdentity,
+  retryable,
   requireParticipant,
   requireAdmin
 };

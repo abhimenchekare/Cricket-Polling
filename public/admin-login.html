@@ -32,6 +32,12 @@
       </button>
     </form>
 
+    <div class="login-hint hidden" id="expired-hint" style="border-color:#7a1020">
+      <strong>Your session ended.</strong> On the free hosting tier the database sleeps when idle —
+      the first click after a pause can drop the session. Nothing was lost: sign in again and the
+      polls, votes and participants are all still there.
+    </div>
+
     <div class="login-hint" id="default-hint">
       <strong>First time?</strong> Default credentials are <code>admin</code> / <code>admin123</code>.
       Change the password from the dashboard once you sign in.
@@ -51,7 +57,13 @@
   const form = document.getElementById('login-form');
   const errBox = document.getElementById('login-error');
   const btn = document.getElementById('login-btn');
-  const nextUrl = new URLSearchParams(location.search).get('next') || '/admin';
+  const params = new URLSearchParams(location.search);
+  const nextUrl = params.get('next') || '/admin';
+
+  if (params.get('expired')) {
+    document.getElementById('expired-hint').classList.remove('hidden');
+    document.getElementById('default-hint').classList.add('hidden');
+  }
 
   function showError(msg) {
     if (!msg) return errBox.classList.add('hidden');

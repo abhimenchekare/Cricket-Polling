@@ -233,6 +233,49 @@
 
   function renderQuick(state) {
     els.quick.innerHTML = `
+      <div class="card" id="rapid-card" style="margin-bottom:16px">
+        <div class="card-head">
+          <div>
+            <div class="eyebrow">⚡ Rapid round</div>
+            <div class="card-title" style="margin-top:4px">Guess the next player</div>
+          </div>
+          <span class="pill pill-live">10–15 SEC</span>
+        </div>
+        <p class="mute-sm" style="margin:0 0 12px">
+          Fires a round instantly: everyone guesses, voting locks at 0&nbsp;s and the answer appears on every
+          screen by itself. Reuse it for every player in the auction.
+        </p>
+        <label class="field" style="display:block;margin-bottom:10px">
+          <span class="mute-sm">Question</span>
+          <input class="input" id="rr-question" maxlength="200" value="${escapeHtml(
+            localStorage.getItem('rr_question') || 'Who will win the bidding for the next player?'
+          )}" style="margin-top:6px" />
+        </label>
+        <label class="field" style="display:block;margin-bottom:10px">
+          <span class="mute-sm">Options — one player per line</span>
+          <textarea class="input" id="rr-options" rows="4" placeholder="Rohit&#10;Virat&#10;Hardik&#10;Jasprit" style="margin-top:6px;resize:vertical;font-family:inherit">${escapeHtml(
+            localStorage.getItem('rr_options') || ''
+          )}</textarea>
+        </label>
+        <div class="row-between" style="flex-wrap:wrap;gap:10px;margin-bottom:12px">
+          <span class="mute-sm">Countdown</span>
+          <div class="segmented" id="rr-seconds" style="max-width:320px;flex:1 1 220px">
+            ${[10, 15, 20, 30, 45, 60]
+              .map(
+                (sec) =>
+                  `<button type="button" data-sec="${sec}" class="${
+                    Number(localStorage.getItem('rr_seconds')) === sec ||
+                    (!localStorage.getItem('rr_seconds') && sec === 15)
+                      ? 'active'
+                      : ''
+                  }">${sec}s</button>`
+              )
+              .join('')}
+          </div>
+        </div>
+        <button class="btn btn-gold" id="rr-start" style="width:100%">⚡ Create &amp; start round</button>
+      </div>
+
       <div class="card">
         <div class="card-head">
           <div>
@@ -252,6 +295,67 @@
     document.getElementById('show-qr').addEventListener('click', showShareModal);
     document.getElementById('event-settings').addEventListener('click', showSettingsModal);
     document.getElementById('change-password').addEventListener('click', showPasswordModal);
+    wireRapidRound();
+  }
+
+  /* ⚡ One-tap round: create the poll, then start it with a seconds countdown. */
+  function wireRapidRound() {
+    const questionEl = document.getElementById('rr-question');
+    const optionsEl = document.getElementById('rr-options');
+    const secondsEl = document.getElementById('rr-seconds');
+    const startBtn = document.getElementById('rr-start');
+    if (!questionEl || !startBtn) return;
+
+    if (!optionsEl.value.trim()) {
+      optionsEl.value = ['Rohit', 'Virat', 'Hardik', 'Jasprit', 'Rishabh'].join('\n');
+    }
+
+    let seconds = Number(localStorage.getItem('rr_seconds')) || 15;
+
+    secondsEl.querySelectorAll('button').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        seconds = Number(btn.dataset.sec);
+        localStorage.setItem('rr_seconds', String(seconds));
+        secondsEl.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b === btn));
+      });
+    });
+
+    startBtn.addEventListener('click', async () => {
+      const question = questionEl.value.trim();
+      const options = optionsEl.value
+        .split(/\n|,/)
+        .map((t) => t.trim())
+        .filter(Boolean)
+        .slice(0, 10);
+      if (question.length < 5) return toast('Write a question first', 'err');
+      if (options.length < 2) return toast('Add at least 2 options', 'err');
+
+      localStorage.setItem('rr_question', question);
+      localStorage.setItem('rr_options', options.join('\n'));
+
+      startBtn.disabled = true;
+      startBtn.textContent = 'Starting…';
+      try {
+        const created = await API.post('/api/admin/polls', {
+          question,
+          description: `Live guessing round · ${seconds}s`,
+          category: 'Rapid round',
+          showResults: 'after', // reveal automatically when the countdown ends
+          anonymous: false,
+          timerSeconds: seconds,
+          options: options.map((label) => ({ label }))
+        });
+        const id = created.poll.id;
+        await API.post(`/api/admin/polls/${id}/action`, { action: 'start', timerSeconds: seconds });
+        toast(`Round live — ${seconds}s on the clock`, 'ok');
+        window.AdminShell.refresh();
+      } catch (err) {
+        toast(err.message || 'Could not start the round', 'err');
+      } finally {
+        startBtn.disabled = false;
+        startBtn.innerHTML = '⚡ Create &amp; start round';
+      }
+    });
   }
 
   function renderActivity(state) {

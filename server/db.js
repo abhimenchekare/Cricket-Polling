@@ -34,9 +34,35 @@ const pool = new Pool({
 
 pool.on('error', (err) => console.error('[db] idle client error', err.message));
 
+/**
+ * Neon / serverless Postgres suspends idle databases and drops idle sockets.
+ * The first query after a pause can fail with a connection error, which used to
+ * surface as "not logged in" (a 401) and bounced the admin back to the login page.
+ * Retry once on transient/connection errors before giving up.
+ */
+const TRANSIENT = /ECONNRESET|ECONNREFUSED|ETIMEDOUT|terminated|timeout|Connection|EHOSTUNREACH|EPIPE|socket|Client has encountered a connection error|Can't reach database server|too many clients/i;
+
+function isTransient(err) {
+  if (!err) return false;
+  const code = String(err.code || '');
+  if (['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE', 'EHOSTUNREACH', '57P01', '57P03', '08006', '08003', '53300'].includes(code)) return true;
+  return TRANSIENT.test(String(err.message || ''));
+}
+
+async function rawQuery(text, params) {
+  try {
+    return await pool.query(text, params);
+  } catch (err) {
+    if (!isTransient(err)) throw err;
+    console.warn('[db] transient error, retrying once:', err.message);
+    await new Promise((r) => setTimeout(r, 250));
+    return pool.query(text, params);
+  }
+}
+
 /** Run a query and return the rows. */
 async function q(text, params = []) {
-  const res = await pool.query(text, params);
+  const res = await rawQuery(text, params);
   return res.rows;
 }
 
@@ -244,4 +270,5 @@ async function logActivity(action, detail, actor = 'admin') {
   }
 }
 
-module.exports = { pool, q, one, scalar, init, ensureInit, logActivity, DEFAULT_SETTINGS, SAMPLE_POLLS };
+module.exports = {
+  isTransient, pool, q, one, scalar, init, ensureInit, logActivity, DEFAULT_SETTINGS, SAMPLE_POLLS };

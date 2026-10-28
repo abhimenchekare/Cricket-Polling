@@ -8,23 +8,72 @@
   let me = null;
   let realtime = null;
 
+  let redirecting = false;
+  let checking = false;
   function redirectToLogin() {
+    if (redirecting) return;
+    redirecting = true;
     const next = encodeURIComponent(location.pathname + location.search);
-    window.location.replace(`/admin-login?next=${next}`);
+    window.location.replace(`/admin-login?next=${next}&expired=1`);
   }
 
-  async function guard() {
-    try {
-      const res = await API.get('/api/admin/me');
-      me = res.admin;
-      return res;
-    } catch (err) {
-      if (err.status === 401) {
-        redirectToLogin();
-        return null;
+  /* A "session expired" banner instead of a hard redirect. Losing an in-progress admin
+     action because of one flaky request is worse than showing a re-login prompt. */
+  function showExpiredBanner() {
+    if (document.getElementById('session-expired')) return;
+    const bar = document.createElement('div');
+    bar.id = 'session-expired';
+    bar.style.cssText =
+      'position:sticky;top:0;z-index:9999;display:flex;gap:10px;align-items:center;justify-content:center;' +
+      'flex-wrap:wrap;padding:10px 14px;background:#7a1020;color:#fff;font:600 14px/1.4 system-ui,sans-serif;' +
+      'box-shadow:0 6px 18px rgba(0,0,0,.35)';
+    bar.innerHTML =
+      '<span>Your admin session ended (or the database was waking up). Nothing was lost.</span>' +
+      '<button id="session-retry" style="cursor:pointer;border:0;border-radius:999px;padding:8px 16px;' +
+      'background:#ffd166;color:#10182e;font:700 13px system-ui,sans-serif">Reconnect</button>' +
+      '<a href="/admin-login" style="color:#ffd166;font-weight:700">Sign in again</a>';
+    document.body.prepend(bar);
+    bar.querySelector('#session-retry').addEventListener('click', async () => {
+      bar.remove();
+      const res = await guard({ silent: true });
+      if (res) {
+        loadState();
+        if (realtime) realtime.poke();
       }
-      throw err;
+    });
+  }
+
+  /**
+   * Confirm we are signed in. Never logs out on a transient failure:
+   *  - 401 twice  -> session really is gone: prompt (or redirect on first load)
+   *  - 503/network -> database waking up / offline: retry, keep the page alive
+   */
+  async function guard({ silent = false, allowRedirect = true } = {}) {
+    let lastErr = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const res = await API.get('/api/admin/me');
+        me = res.admin;
+        const bar = document.getElementById('session-expired');
+        if (bar) bar.remove();
+        return res;
+      } catch (err) {
+        lastErr = err;
+        if (err.status === 401) {
+          if (attempt < 2) {
+            await new Promise((r) => setTimeout(r, 700));
+            continue;
+          }
+          if (allowRedirect) redirectToLogin();
+          else showExpiredBanner();
+          return null;
+        }
+        // 503 / network / timeout: wait and retry — do NOT sign the admin out
+        await new Promise((r) => setTimeout(r, 800 + attempt * 700));
+      }
     }
+    if (!silent) showExpiredBanner();
+    return null;
   }
 
   function paintAdminName() {
@@ -77,7 +126,8 @@
       paintEvent(adminState.settings);
       emit();
     } catch (err) {
-      if (err.status === 401) redirectToLogin();
+      // Background refresh failed: 401 -> prompt re-login instead of nuking the page.
+      if (err.status === 401) showExpiredBanner();
     }
   }
 
@@ -112,13 +162,26 @@
       },
       onStatus: setConn,
       onError: (err) => {
-        if (err && err.status === 401) redirectToLogin();
+        setConn(false);
+        if (err && err.status === 401) showExpiredBanner();
+        // 503 / offline: createRealtime keeps polling; the banner only appears if it never recovers.
       }
     });
   }
 
+  /* A single 401 anywhere in the panel triggers one verification attempt (not a logout). */
+  window.addEventListener('app:unauthorized', () => {
+    if (checking) return;
+    checking = true;
+    setTimeout(async () => {
+      checking = false;
+      if (document.getElementById('session-expired')) return;
+      await guard({ silent: true, allowRedirect: false });
+    }, 400);
+  });
+
   async function boot() {
-    const res = await guard();
+    const res = await guard({ allowRedirect: true });
     if (!res) return;
     paintAdminName();
     markActiveNav();
