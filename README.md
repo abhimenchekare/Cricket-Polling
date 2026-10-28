@@ -149,6 +149,32 @@ Now:
   banner appear — page, modal and typing stay exactly where they were.
 - A genuine expiry lands on the login page with an explanation instead of a blind redirect.
 
+## 4d. 🩺 "Session check" — what to click when the panel logs you out
+
+Dashboard → **🩺 Session check** (Quick actions) shows live values from *your* deployment:
+
+| Line | What it tells you |
+| --- | --- |
+| Admin cookie present in this browser | `NO` → the browser isn't sending the cookie (wrong URL scheme, embedded preview, cookies blocked) |
+| Cookie found in database | `NO` → the cookie belongs to a different database or a session reset — sign in once more |
+| Session expires in | Should be ~720 min; sliding expiry refreshes it on every authenticated request |
+| DATABASE_URL set / Reachable | `NO` → the server can't reach Postgres (Neon paused, bad connection string) |
+| Schema version | Must be `3`; anything else means the tables were only half-created |
+| Admin accounts / sessions, Expired sessions in DB | Sanity numbers — expired rows are cleaned up on sight |
+| Commit / Environment / Region | Confirms which deployment you are actually looking at |
+
+**Copy report** puts the whole JSON on your clipboard — paste it in the chat and the cause is usually
+obvious in one line. The same data is available without logging in at `GET /api/diag`
+(cookie presence and booleans only; no secrets).
+
+Common verdicts:
+
+- **Cookie present = NO** → you're on a URL where cookies are dropped: a preview/proxy subdomain, or
+  a link that strips cookies. Open the deployment's own `https://…vercel.app` address directly.
+- **Cookie present = yes, found in DB = NO** → the deployment points at a different database than the
+  one you signed into (e.g. Neon integration added twice, or a Preview vs Production mismatch).
+- **Reachable = NO** → Neon suspended/limits reached, or `DATABASE_URL` missing on *this* deployment.
+
 ## 5. Pages
 
 | Page | URL |
