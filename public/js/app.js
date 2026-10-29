@@ -242,6 +242,56 @@
       .join('');
   }
 
+
+  /* ── "a newer version was deployed" watcher ──
+     Prevents the classic "I deployed but my browser still shows the old site":
+     compare the build id served by /api/health with the one we loaded with. */
+  let loadedBuild = null;
+
+  async function currentBuild() {
+    try {
+      const res = await fetch('/api/health', { cache: 'no-store' });
+      const data = await res.json();
+      return data && data.build ? String(data.build) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function watchForNewBuild({ intervalMs = 60000, onNewBuild } = {}) {
+    loadedBuild = loadedBuild || (await currentBuild());
+    if (!loadedBuild) return;
+    setInterval(async () => {
+      const now = await currentBuild();
+      if (!now || now === loadedBuild) return;
+      // A first deploy has no commit suffix ("2.2.1+local" → "2.2.1+abc1234"): compare the
+      // version part only, so local/CLI builds don't false-alarm.
+      if (now.split('+')[0] === loadedBuild.split('+')[0]) return;
+      if (onNewBuild) onNewBuild(now);
+      else showUpdateBanner(now);
+    }, intervalMs);
+  }
+
+  function showUpdateBanner(build) {
+    if (document.getElementById('new-build-banner')) return;
+    const bar = document.createElement('div');
+    bar.id = 'new-build-banner';
+    bar.style.cssText =
+      'position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:99999;display:flex;' +
+      'gap:12px;align-items:center;padding:12px 16px;border-radius:14px;background:#0d1b33;color:#fff;' +
+      'border:1px solid rgba(53,208,127,.5);box-shadow:0 14px 40px rgba(0,0,0,.5);' +
+      'font:600 14px/1.35 system-ui,sans-serif;max-width:92vw';
+    bar.innerHTML =
+      `<span>A newer version (${String(build).split('+')[0]}) is deployed.</span>` +
+      '<button id="new-build-reload" style="cursor:pointer;border:0;border-radius:999px;padding:8px 16px;' +
+      'background:#35d07f;color:#06121f;font:800 13px system-ui,sans-serif">Reload</button>' +
+      '<button id="new-build-later" aria-label="Dismiss" style="cursor:pointer;border:0;background:none;' +
+      'color:#8fa1bd;font:600 13px system-ui,sans-serif">later</button>';
+    document.body.appendChild(bar);
+    bar.querySelector('#new-build-reload').addEventListener('click', () => location.reload());
+    bar.querySelector('#new-build-later').addEventListener('click', () => bar.remove());
+  }
+
   /* ------------------------------ formatting ---------------------------- */
 
   function plural(n, one, many) {
@@ -336,14 +386,154 @@
      the tab is hidden. A version fingerprint skips redundant re-renders.
   ---------------------------------------------------------------------- */
 
+  /**
+   * Live channel. Tries Server-Sent Events first: the server pushes the new state the moment
+   * anything changes, so an admin action lands on every phone in well under a second.
+   * If the stream cannot be opened (old browser, proxy, flaky network) it falls back to the
+   * adaptive poller silently — the caller cannot tell the difference.
+   */
+  function createLiveChannel(options) {
+    const {
+      url = '/api/state',
+      streamUrl = '/api/stream',
+      onData,
+      onStatus,
+      onError,
+      activeInterval,
+      idleInterval,
+      immediate = true,
+      allowStream = true
+    } = options;
+
+    let source = null;
+    let fallback = null;
+    let stopped = false;
+    let gotFirstPayload = false;
+    let errorStreak = 0;
+
+    // visible to tests and to anyone debugging: "stream" or "polling"
+    const setMode = (m) => {
+      window.__liveMode = m;
+    };
+    setMode('stream');
+
+    const startFallback = (why) => {
+      if (stopped || fallback) return;
+      if (source) {
+        try {
+          source.close();
+        } catch {
+          /* ignore */
+        }
+        source = null;
+      }
+      if (why && typeof console !== 'undefined') console.info(`[live] polling instead of stream (${why})`);
+      setMode('polling');
+      fallback = createRealtime({
+        url,
+        onData,
+        onStatus,
+        onError,
+        activeInterval,
+        idleInterval,
+        immediate
+      });
+    };
+
+    if (!allowStream || typeof window.EventSource !== 'function') {
+      startFallback('no EventSource');
+      return {
+        poke: () => fallback && fallback.poke(),
+        stop: () => {
+          stopped = true;
+          fallback && fallback.stop();
+        },
+        forceRenderNext: () => fallback && fallback.forceRenderNext(),
+        get mode() {
+          return 'polling';
+        }
+      };
+    }
+
+    const connect = () => {
+      if (stopped) return;
+      try {
+        source = new EventSource(streamUrl);
+      } catch (err) {
+        startFallback(err && err.message);
+        return;
+      }
+
+      source.addEventListener('state', (event) => {
+        errorStreak = 0;
+        gotFirstPayload = true;
+        setMode('stream');
+        let data = null;
+        try {
+          data = JSON.parse(event.data);
+        } catch {
+          return;
+        }
+        onStatus && onStatus('online');
+        onData && onData(data);
+      });
+
+      source.addEventListener('bye', () => {
+        // server ends the stream on purpose every ~45 s; EventSource reconnects by itself
+        if (source) {
+          try {
+            source.close();
+          } catch {
+            /* ignore */
+          }
+          source = null;
+        }
+        setTimeout(connect, 60);
+      });
+
+      source.onerror = () => {
+        errorStreak += 1;
+        // One hiccup is normal (reconnect); a run of them means the stream is blocked here.
+        if (!gotFirstPayload || errorStreak >= 3) startFallback(`EventSource error ×${errorStreak}`);
+      };
+    };
+
+    connect();
+
+    // A hidden tab holds its stream open (cheap); coming back should still be instant.
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && fallback) fallback.poke();
+    });
+
+    return {
+      poke: () => fallback && fallback.poke(),
+      stop() {
+        stopped = true;
+        if (source) {
+          try {
+            source.close();
+          } catch {
+            /* ignore */
+          }
+          source = null;
+        }
+        fallback && fallback.stop();
+      },
+      forceRenderNext: () => fallback && fallback.forceRenderNext(),
+      get mode() {
+        return fallback ? 'polling' : 'stream';
+      }
+    };
+  }
+
   function createRealtime(options) {
     const {
       url,
       onData,
       onStatus,
       onError,
-      activeInterval = 2500, // a poll is live
-      idleInterval = 7000, // nothing happening
+      activeInterval = 1200, // a poll is live — short enough to feel instant
+      idleInterval = 3000, // nothing happening
       hiddenMultiplier = 4,
       immediate = true
     } = options;
@@ -463,8 +653,12 @@
     debounce,
     setBusy,
     createRealtime,
+    createLiveChannel,
     copyText,
     plural,
+    currentBuild,
+    watchForNewBuild,
+    showUpdateBanner,
     bidResultRows,
     getAdminToken,
     setAdminToken,

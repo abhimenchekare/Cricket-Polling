@@ -64,7 +64,7 @@ const LIVE_AND_HISTORY = `
  * Options, vote counts, "my votes" and every bid guess for a set of polls, as four JSON
  * arrays in a single round-trip. "mine" is empty when nobody is signed in.
  */
-function bulkSql(ids) {
+function bulkSql(ids, viewerParam = '$1') {
   return `
   SELECT
     COALESCE((SELECT json_agg(x) FROM (
@@ -75,7 +75,7 @@ function bulkSql(ids) {
        WHERE poll_id IN ${ids} GROUP BY poll_id, option_id) x), '[]'::json) AS counts,
     COALESCE((SELECT json_agg(x) FROM (
       SELECT poll_id, option_id, guess_lakh FROM votes
-       WHERE participant_id = $1 AND poll_id IN ${ids}) x), '[]'::json) AS mine,
+       WHERE participant_id = ${viewerParam} AND poll_id IN ${ids}) x), '[]'::json) AS mine,
     COALESCE((SELECT json_agg(x) FROM (
       SELECT v.poll_id, v.guess_lakh, v.created_at,
              p.id AS participant_id, p.name, p.employee_id
@@ -418,33 +418,69 @@ async function currentPollRow() {
 /* Public state                                                       */
 /* ------------------------------------------------------------------ */
 
-async function buildPublicState(participantId = null) {
-  await sweepExpiredPolls();
+/** One statement that returns everything the public state needs (rows + counts + bulk). */
+const PUBLIC_STATE_SQL = `
+  WITH core AS (
+    SELECT (SELECT COALESCE(json_object_agg(key, value), '{}'::json) FROM settings) AS settings,
+           (SELECT COUNT(*)::int FROM participants) AS participants,
+           (SELECT COUNT(*)::int FROM participants WHERE last_seen_at > $1) AS online
+  )
+  SELECT (SELECT row_to_json(core) FROM core) AS core,
+         (SELECT COALESCE(json_agg(r), '[]'::json) FROM (${LIVE_AND_HISTORY}) r) AS rows,
+         (SELECT row_to_json(b) FROM (${bulkSql(VISIBLE_IDS, '$2')}) b) AS bulk`;
 
-  // Everything below runs in ONE parallel round-trip (two queries) instead of the ~48
-  // sequential ones this used to need. Keep it that way: /api/state is polled every 2 s.
-  const [core, rows, bulk] = await Promise.all([
-    one(
-      `SELECT (SELECT COALESCE(json_object_agg(key, value), '{}'::json) FROM settings) AS settings,
-              (SELECT COUNT(*)::int FROM participants) AS participants,
-              (SELECT COUNT(*)::int FROM participants WHERE last_seen_at > $1) AS online`,
-      [Date.now() - 2 * 60 * 1000]
-    ),
-    q(LIVE_AND_HISTORY),
-    one(bulkSql(VISIBLE_IDS), [participantId])
+/**
+ * Fingerprint of everything a viewer can see. One cheap query; the live stream compares it on a
+ * timer and pushes the full state the instant it changes.
+ */
+const FINGERPRINT_SQL = `
+  SELECT md5(concat_ws('~',
+    (SELECT COALESCE(sum(revision), 0)::text FROM polls),
+    (SELECT COUNT(*)::text FROM votes),
+    (SELECT COUNT(*)::text FROM participants),
+    (SELECT COALESCE(sum(COALESCE(actual_lakh, 0)), 0)::text FROM polls),
+    (SELECT COALESCE(string_agg(key || '=' || value, ',' ORDER BY key), '') FROM settings),
+    (SELECT COALESCE(max(last_seen_at), 0)::text FROM participants)
+  )) AS fingerprint`;
+
+async function stateFingerprint() {
+  const row = await one(FINGERPRINT_SQL);
+  return row ? row.fingerprint : null;
+}
+
+async function buildPublicState(participantId = null) {
+  // The sweep and the read run in PARALLEL (one round-trip's worth of waiting, not two).
+  // The read may still see a poll that just expired, so rows are normalised below.
+  const [, row] = await Promise.all([
+    sweepExpiredPolls(),
+    one(PUBLIC_STATE_SQL, [Date.now() - 2 * 60 * 1000, participantId])
   ]);
 
-  const ctx = indexBulk(bulk);
-  const settings = (core && core.settings) || {};
+  return assemblePublicState(row, participantId);
+}
 
-  const liveRow = rows.find((r) => r.slot === 'live') || null;
-  const latestClosed = rows.find((r) => r.slot === 'latest_closed') || null;
-  const historyRows = rows
+/** Pure: turn the single PUBLIC_STATE_SQL row into the public payload. */
+function assemblePublicState(row, participantId = null) {
+  const core = (row && row.core) || {};
+  const settings = core.settings || {};
+  const ctx = indexBulk((row && row.bulk) || {});
+  const now = Date.now();
+  const allRows = ((row && row.rows) || []).map((r) => {
+    // a countdown that ran out between the sweep and this read, or in another lambda:
+    if (r.status === 'active' && r.ends_at && Number(r.ends_at) <= now) {
+      return { ...r, status: 'closed', closed_at: Number(r.ends_at) };
+    }
+    return r;
+  });
+
+  const liveRow = allRows.find((r) => r.slot === 'live' && r.status !== 'closed') || null;
+  const latestClosed = allRows.find((r) => r.slot === 'latest_closed') || null;
+  const historyRows = allRows
     .filter((r) => r.slot === 'history')
     .sort((a, b) => Number(b.closed_at || 0) - Number(a.closed_at || 0) || b.id - a.id);
+
   const poll = liveRow || latestClosed || null;
   const kind = liveRow ? 'live' : poll ? 'closed' : 'none';
-
   const visible = resultsVisibleToParticipants(poll);
   const serialized = assemblePoll(poll, ctx, { includeResults: visible, participantId });
   const history = historyRows.map((h) =>
@@ -452,7 +488,7 @@ async function buildPublicState(participantId = null) {
   );
 
   return {
-    serverTime: Date.now(),
+    serverTime: now,
     event: {
       name: settings.event_name,
       tagline: settings.event_tagline,
@@ -461,8 +497,8 @@ async function buildPublicState(participantId = null) {
       joinRequiresCode: settings.join_requires_code === '1'
     },
     stats: {
-      participants: Number(core ? core.participants : 0),
-      online: Number(core ? core.online : 0),
+      participants: Number(core.participants || 0),
+      online: Number(core.online || 0),
       votesOnCurrent: serialized ? serialized.totalVotes : 0
     },
     poll: serialized,
@@ -579,6 +615,8 @@ async function buildAdminState() {
 
 module.exports = {
   POLL_SELECT,
+  assemblePublicState,
+  stateFingerprint,
   assemblePoll,
   indexBulk,
   getBidResults,

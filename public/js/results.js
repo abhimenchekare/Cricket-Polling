@@ -126,7 +126,7 @@
       : '<span class="pill pill-ghost">● Reconnecting…</span>';
   }
 
-  window.App.createRealtime({
+  window.App.createLiveChannel({
     url: '/api/state',
     activeInterval: 3000,
     idleInterval: 8000,

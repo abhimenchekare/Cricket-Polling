@@ -168,8 +168,8 @@
   function connect() {
     realtime = window.App.createRealtime({
       url: '/api/admin/state',
-      activeInterval: 3000,
-      idleInterval: 6000, // admin panel: always reasonably fresh
+      activeInterval: 1200,
+      idleInterval: 2500, // admin panel: always reasonably fresh
       onData: (payload) => {
         setConn(true);
         adminState = payload;

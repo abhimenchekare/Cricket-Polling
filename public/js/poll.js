@@ -28,6 +28,8 @@
   }
 
   /* ------------------------------ bootstrap ------------------------------ */
+  // Tell the phone when a newer deployment is live (banner, never an auto-reload).
+  if (window.App.watchForNewBuild) window.App.watchForNewBuild({ intervalMs: 90000 });
 
   async function init() {
     try {
@@ -62,7 +64,7 @@
   let realtime = null;
 
   function startRealtime() {
-    realtime = window.App.createRealtime({
+    realtime = window.App.createLiveChannel({
       url: '/api/state',
       activeInterval: (meta && meta.polling && meta.polling.activeMs) || 3000,
       idleInterval: (meta && meta.polling && meta.polling.idleMs) || 8000,

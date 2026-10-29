@@ -242,6 +242,119 @@ no floating-point rounding can ever make two different guesses look equal.
 
 ---
 
+## 4f. Instant updates: the live stream (2.4.0)
+
+The host presses **Start** and every phone shows the poll straight away — no refresh, no waiting
+for the next poll tick. That is a **Server-Sent Events** stream, not polling.
+
+```
+GET /api/stream
+event: ready
+data: {"serverTime":...,"intervalMs":400}
+
+event: state
+data: {"reason":"change","poll":{...},"stats":{...},"history":[...],"version":"..."}
+```
+
+How it behaves:
+
+- The audience pages (`/poll`, `/results`, `/display`) open **one** long-lived response.
+- The server watches a cheap MD5 fingerprint of everything a viewer can see (poll revisions, vote
+  count, participant count, sold prices, settings) on a 300 ms timer — 900 ms when the room has
+  been idle for 20 s — and pushes the **full state** the moment it changes, so the client never
+  needs a second request.
+- The connection is closed on purpose after ~45 s and `EventSource` reconnects automatically.
+  `maxDuration` is 60 s, so nothing is ever cut off mid-write.
+- If the stream cannot be opened (old browser, corporate proxy, flaky phone network) the page
+  **silently falls back to polling** at 1.2 s while a poll is live, 3 s when idle.
+- The admin panel polls (1.2 s / 2.5 s) — it is the writer, so push buys it nothing.
+
+Measured on localhost (`npm run test:live`):
+
+| Action | Time until it is on screen |
+|---|---|
+| admin presses Start → audience phone | **254 ms** |
+| admin presses Start → projector screen | **280 ms** |
+| a vote → projector count updates | **307 ms** |
+| admin closes the poll → results appear | **12 ms** |
+
+Test it yourself against any deployment:
+
+```bash
+npm run test:live                                     # local
+BASE_URL=https://your-app.vercel.app npm run test:live
+```
+
+It checks the stream is actually in use, times all four interactions, and verifies the polling
+fallback still works when `/api/stream` is blocked.
+
+**Region matters more than code.** If the measurement on the live site is seconds rather than
+milliseconds, open `/api/diag`:
+
+- `config.databaseAwsRegion` — where the Neon database physically sits (e.g. `ap-southeast-1`).
+- `config.functionRegion` — where Vercel runs this app (e.g. `iad1`).
+- `config.suggestedVercelRegion` — the Vercel region that matches the database.
+- `config.regionMatches` — `true` when they already line up.
+
+When `regionMatches` is `false`, pin the function to the database's region in `vercel.json`:
+
+```json
+{ "regions": ["sin1"] }
+```
+
+(For an audience in India, `bom1` is the low-latency choice **if** the database is in
+`ap-south-1`; otherwise match the database — a fast function talking to a far-away database is
+still slow.) `perf.stateMs` in `/api/diag` shows how long the state build takes on that
+deployment; same-region is typically 5-20 ms, cross-region 200-400 ms.
+
+---
+
+## 5. Speed: why pages felt slow on Vercel (fixed in 2.3.0)
+
+Symptom: the dashboard and the poll screen took 5-15 seconds to appear on the live site, while
+localhost was instant.
+
+Cause: the database lives in a different region from the lambda, so **every** SQL round-trip costs
+~230 ms. `buildPublicState()` loaded the live poll, then looped over the 12 history polls and ran
+~4 queries for each, one after another — about **48 sequential round-trips ≈ 9 s**. The admin
+dashboard was worse (one query pair per poll, ~40 round-trips ≈ 15 s).
+
+Fix — the state layer now batches:
+
+| | before | after |
+|---|---|---|
+| `/api/state` SQL round-trips | ~48 sequential | **4** (1 sweep + 3 in parallel) |
+| `/api/admin/state` | ~40 sequential | **5** |
+| live `/api/state` latency | 9.1-10 s | ~0.6 s |
+| poll screen usable | 9.5 s | < 1 s |
+| admin dashboard usable | 15.4 s | ~1.5 s |
+
+How it works (`server/state.js`):
+
+- `LIVE_AND_HISTORY` fetches the live poll, the newest closed poll and the last 12 closed polls in
+  **one** query, tagged with a `slot` column.
+- `bulkSql()` returns options, vote counts, "my votes" and every bid guess for *all* those polls as
+  four JSON arrays in **one** query.
+- `indexBulk()` groups those rows in memory; `assemblePoll()` is pure — no queries per poll.
+
+**Rule for future changes: never query inside a loop over polls.** If you add a field to the state
+payload, add it to `bulkSql()` (or to the poll select), not to a per-poll function.
+
+Also in 2.3.0: the pg pool keeps TCP connections alive (`keepAlive`, 30 s idle timeout), which
+removes a TLS handshake per cold start.
+
+Verify anytime — works against localhost or the live URL:
+
+```bash
+npm run test:perf                                    # local
+BASE_URL=https://your-app.vercel.app npm run test:perf   # live
+```
+
+It prints `/api/state` p50/p95 and the time until the poll screen and dashboard are usable, and
+fails if `/api/state` exceeds 2500 ms or a screen exceeds 5000 ms.
+
+---
+
 ## 5a. "I deployed but my browser shows the old site"
 
 Since 2.2.1 the app tells you when a newer deployment exists: an in-page banner

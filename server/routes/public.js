@@ -93,6 +93,99 @@ router.get('/state', async (req, res, next) => {
   }
 });
 
+/* --------------------------------- stream --------------------------------- */
+/*
+  Server-Sent Events: the audience screens hold ONE open response and the server pushes the
+  new state the instant anything changes. That is what makes "admin hits Start" appear on every
+  phone without anyone refreshing.
+
+  Serverless has no shared memory, so the function watches the database fingerprint on a short
+  timer. The connection is closed after ~45 s and the browser reconnects automatically (that is
+  built into EventSource), which stays well inside Vercel's function duration cap.
+*/
+
+router.get('/stream', async (req, res) => {
+  const viewerId = req.participant?.id || null;
+
+  res.status(200);
+  res.set({
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+    Connection: 'keep-alive',
+    // stop nginx/CDN style proxies from buffering the stream
+    'X-Accel-Buffering': 'no'
+  });
+  res.flushHeaders?.();
+
+  let closed = false;
+  let timer = null;
+  let lastFingerprint = null;
+  let lastSentAt = 0;
+  const startedAt = Date.now();
+  const MAX_MS = 45_000;
+
+  const send = (event, data) => {
+    if (closed) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  const pushState = async (reason) => {
+    const payload = await state.buildPublicState(viewerId);
+    payload.version = state.publicVersion(payload);
+    lastFingerprint = await state.stateFingerprint().catch(() => null);
+    lastSentAt = Date.now();
+    send('state', { reason, ...payload });
+  };
+
+  req.on('close', () => {
+    closed = true;
+  });
+
+  try {
+    // Say hello immediately so the client switches off polling without waiting for a change.
+    send('ready', { serverTime: Date.now(), intervalMs: 400 });
+    await pushState('connect');
+  } catch (err) {
+    send('stream-error', { error: 'Could not load state' });
+    return res.end();
+  }
+
+  // Heartbeat keeps proxies from dropping an idle stream.
+  const heartbeat = setInterval(() => {
+    if (!closed) res.write(': ping\n\n');
+  }, 15_000);
+
+  const tick = async () => {
+    if (closed) return;
+    if (Date.now() - startedAt > MAX_MS) {
+      cleanup();
+      if (!closed) res.write('event: bye\ndata: {}\n\n');
+      return res.end();
+    }
+    try {
+      const fp = await state.stateFingerprint();
+      if (fp && fp !== lastFingerprint) {
+        await pushState('change');
+      }
+    } catch {
+      /* transient DB hiccup — keep the connection, retry on the next tick */
+    }
+    // Fast while people are voting, calmer when the room is idle.
+    const idleFor = Date.now() - lastSentAt;
+    const delay = idleFor > 20_000 ? 900 : 300;
+    timer = setTimeout(tick, delay);
+  };
+
+  timer = setTimeout(tick, 300);
+
+  function cleanup() {
+    clearInterval(heartbeat);
+    clearTimeout(timer);
+  }
+  res.on('close', cleanup);
+  res.on('finish', cleanup);
+});
+
 /* ---------------------------------- join --------------------------------- */
 
 router.post('/join', async (req, res, next) => {

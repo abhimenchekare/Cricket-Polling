@@ -32,7 +32,7 @@
       /* retried by the poller below */
     }
 
-    window.App.createRealtime({
+    window.App.createLiveChannel({
       url: '/api/state',
       activeInterval: 2000,
       idleInterval: 5000,

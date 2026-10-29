@@ -73,6 +73,24 @@ app.get('/api/diag', async (req, res) => {
     /* ignore */
   }
 
+  /* Region co-location is the single biggest speed lever: if the database sits in another
+     continent, every query costs 200+ ms instead of ~2 ms. Work out what we can from the host. */
+  const awsToVercel = {
+    'us-east-1': 'iad1',
+    'us-east-2': 'cle1',
+    'us-west-1': 'sfo1',
+    'us-west-2': 'pdx1',
+    'ap-south-1': 'bom1',
+    'ap-southeast-1': 'sin1',
+    'ap-southeast-2': 'syd1',
+    'ap-northeast-1': 'hnd1',
+    'eu-central-1': 'fra1',
+    'eu-west-1': 'dub1'
+  };
+  const awsRegion = (host && (host.match(/([a-z]{2}-[a-z]+-\d)\./) || [])[1]) || null;
+  const functionRegion = process.env.VERCEL_REGION || null;
+  const suggestedRegion = awsRegion ? awsToVercel[awsRegion] || null : null;
+
   const out = {
     ok: true,
     service: 'cricket-polling',
@@ -90,6 +108,10 @@ app.get('/api/diag', async (req, res) => {
       adminSessionHours: Number(process.env.ADMIN_SESSION_HOURS || 12),
       participantSessionDays: Number(process.env.PARTICIPANT_SESSION_DAYS || 7),
       databaseHost: host,
+      databaseAwsRegion: awsRegion,
+      functionRegion,
+      suggestedVercelRegion: suggestedRegion,
+      regionMatches: Boolean(suggestedRegion && functionRegion && suggestedRegion === functionRegion),
       node: process.version
     },
     request: {
@@ -99,9 +121,21 @@ app.get('/api/diag', async (req, res) => {
       secureRequest: req.protocol === 'https'
     },
     database: { configured: Boolean(databaseUrl), reachable: false, latencyMs: null, error: null },
+    perf: { stateMs: null },
     schema: {},
     counts: {}
   };
+
+  // 0) How long does building the full public state take here? (this is what a page waits for)
+  if (databaseUrl) {
+    try {
+      const t = Date.now();
+      await withTimeout(require('./state').buildPublicState(null), 8000, 'state');
+      out.perf.stateMs = Date.now() - t;
+    } catch (err) {
+      out.perf.stateError = err.message;
+    }
+  }
 
   // 1) Can we even talk to Postgres?
   if (databaseUrl) {

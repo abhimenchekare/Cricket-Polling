@@ -8,7 +8,7 @@
   "functions": {
     "api/index.js": {
       "memory": 1024,
-      "maxDuration": 30
+      "maxDuration": 60
     }
   },
   "cleanUrls": true,
@@ -36,6 +36,19 @@
     }
   ],
   "headers": [
+    {
+      "source": "/api/stream",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, no-cache, must-revalidate"
+        },
+        {
+          "key": "X-Accel-Buffering",
+          "value": "no"
+        }
+      ]
+    },
     {
       "source": "/",
       "headers": [
