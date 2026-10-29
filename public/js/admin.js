@@ -38,7 +38,7 @@
     UI.animateBars(document);
   }
 
-  /* ------------------------------ 📣 SHOUT -------------------------------- */
+  /* ------------------------------ SHOUT -------------------------------- */
 
   /** The one control the host uses: call the next player onto the block. */
   function renderShout(state) {
@@ -47,7 +47,12 @@
     const counts = a.counts || {};
     const live =
       state.polls.find((p) => p.status === 'active') || state.polls.find((p) => p.status === 'paused');
-    const block = a.players.find((p) => p.status === 'on_block') || null;
+    /* The player on the block is the one whose round is live — fall back to the flag. */
+    const liveId = live ? live.id : null;
+    const block =
+      (liveId && a.players.find((p) => p.pollId === liveId)) ||
+      a.players.find((p) => p.status === 'on_block') ||
+      null;
     const next = (a.upNext || [])[0] || null;
     const sold = Number(counts.sold || 0);
     const total = Number(counts.total || 0);
@@ -57,7 +62,7 @@
         <div class="card" style="margin-bottom:16px;border-color:rgba(246,196,83,.45)">
           <div class="card-head">
             <div>
-              <div class="eyebrow">📣 On the block</div>
+              <div class="eyebrow">On the block</div>
               <div class="card-title" style="margin-top:4px">Load your player list first</div>
             </div>
           </div>
@@ -65,7 +70,7 @@
             Paste the auction list once (one player per line). After that you never type a name again —
             you just press <strong>SHOUT</strong> and the next player is on every screen.
           </p>
-          <a class="btn btn-gold btn-lg" href="/admin-players">📋 Add players</a>
+          <a class="btn btn-gold btn-lg" href="/admin-players">Add players</a>
         </div>`;
       return;
     }
@@ -96,7 +101,7 @@
       <div class="card card-hero" style="margin-bottom:16px;border-color:rgba(246,196,83,.4)">
         <div class="card-head" style="align-items:flex-start">
           <div class="grow">
-            <div class="eyebrow">📣 Auction queue</div>
+            <div class="eyebrow">Auction queue</div>
             <div style="margin-top:10px">${blockLine}</div>
           </div>
           <div style="text-align:right">
@@ -117,7 +122,7 @@
                  <button class="btn btn-ghost btn-sm" id="shout-undo">⟲ Undo shout</button>`
               : ''
           }
-          <a class="btn btn-ghost btn-sm" href="/admin-players">📋 Manage list</a>
+          <a class="btn btn-ghost btn-sm" href="/admin-players">Manage list</a>
           <span class="grow"></span>
           <span class="mute-sm">${counts.queued || 0} still queued</span>
         </div>
@@ -149,22 +154,126 @@
                </div>`
             : ''
         }
+
+        ${block && block.pollId && !block.soldLakh ? settleBlock(block) : ''}
       </div>`;
 
     wireShout(state, block, live);
   }
 
+  /* The hammer price can be typed at any moment — during the round, after the countdown ran out,
+     or five players later. Nothing here is on a clock. */
+  function settleBlock(block) {
+    const ladder = metaLadder() || [];
+    if (!ladder.length) {
+      ensureLadder();
+      return `
+        <div id="shout-settle" style="margin-top:16px;padding-top:16px;border-top:1px solid rgba(255,255,255,.09)">
+          <div class="eyebrow" style="margin:0">Sold price for ${escapeHtml(block.name)}</div>
+          <p class="mute-sm" style="margin:8px 0 0">Loading the price ladder…</p>
+        </div>`;
+    }
+    const startIndex = Math.max(0, ladder.findIndex((x) => x.lakh === 1000));
+    return `
+      <div id="shout-settle" style="margin-top:16px;padding-top:16px;border-top:1px solid rgba(255,255,255,.09)">
+        <div class="row-between" style="flex-wrap:wrap;gap:8px">
+          <div class="eyebrow" style="margin:0">Sold price for ${escapeHtml(block.name)}</div>
+          <span class="pill pill-ghost">no time limit</span>
+        </div>
+        <p class="mute-sm" style="margin:8px 0 10px">
+          Type it whenever the hammer falls — even after the countdown ended. Winners are declared
+          the moment you press the button, and you can still shout the next player in the meantime.
+        </p>
+        <div class="bid-admin-value" id="ss-value" style="font:800 clamp(22px,3vw,30px)/1 system-ui;color:var(--gold-300,#ffd166)">
+          ${escapeHtml(ladder[startIndex] ? ladder[startIndex].label : '—')}
+        </div>
+        <div class="row" style="gap:10px;align-items:center;margin-top:8px">
+          <button class="btn btn-ghost btn-sm" id="ss-minus" aria-label="Lower">−</button>
+          <input class="bid-range" id="ss-range" type="range" min="0" max="${ladder.length - 1}"
+                 step="1" value="${startIndex}" style="flex:1" aria-label="Sold price for ${escapeHtml(block.name)}" />
+          <button class="btn btn-ghost btn-sm" id="ss-plus" aria-label="Raise">+</button>
+        </div>
+        <div class="bid-chips" id="ss-chips" style="justify-content:flex-start;margin-top:10px">
+          ${[20, 100, 500, 1000, 2000, 3000]
+            .map((lakh) => {
+              const idx = ladder.findIndex((x) => x.lakh === lakh);
+              return idx < 0
+                ? ''
+                : `<button type="button" class="bid-chip" data-index="${idx}">${escapeHtml(ladder[idx].label)}</button>`;
+            })
+            .join('')}
+        </div>
+        <button class="btn btn-gold" id="ss-save" style="margin-top:12px;width:100%;padding:14px">
+          Declare the three winners
+        </button>
+      </div>`;
+  }
+
+  function wireSettle(block) {
+    const wrap = document.getElementById('shout-settle');
+    if (!wrap || !block || !block.pollId) return;
+    const ladder = metaLadder() || [];
+    const range = document.getElementById('ss-range');
+    const valueEl = document.getElementById('ss-value');
+    const saveBtn = document.getElementById('ss-save');
+    if (!range || !valueEl || !saveBtn) return;
+
+    const paint = () => {
+      const step = ladder[Number(range.value)];
+      valueEl.textContent = step ? step.label : '—';
+      wrap.querySelectorAll('.bid-chip').forEach((chip) =>
+        chip.classList.toggle('active', Number(chip.dataset.index) === Number(range.value))
+      );
+    };
+    range.addEventListener('input', paint);
+    document.getElementById('ss-minus').addEventListener('click', () => {
+      range.value = String(Math.max(0, Number(range.value) - 1));
+      paint();
+    });
+    document.getElementById('ss-plus').addEventListener('click', () => {
+      range.value = String(Math.min(ladder.length - 1, Number(range.value) + 1));
+      paint();
+    });
+    wrap.querySelectorAll('.bid-chip').forEach((chip) =>
+      chip.addEventListener('click', () => {
+        range.value = chip.dataset.index;
+        paint();
+      })
+    );
+
+    saveBtn.addEventListener('click', async () => {
+      const step = ladder[Number(range.value)];
+      if (!step) return;
+      setBusy(saveBtn, true, 'Saving…');
+      try {
+        const res = await API.post(`/api/admin/polls/${block.pollId}/actual`, { lakh: step.lakh });
+        const names = (res.winners || []).map((w) => w.name).join(', ');
+        toast(`Sold for ${res.actualLabel}${names ? ' · winners: ' + names : ''}`, 'ok');
+        window.AdminShell.refresh();
+      } catch (err) {
+        toast(err.message, 'err');
+        setBusy(saveBtn, false);
+      }
+    });
+    paint();
+  }
+
   function wireShout(state, block, live) {
+    wireSettle(block);
+    if (block && block.pollId && !block.soldLakh && !metaLadder().length) ensureLadder();
     const button = document.getElementById('shout-btn');
     const next = (state.auction && state.auction.upNext && state.auction.upNext[0]) || null;
 
+    let confirmedUnpriced = false;
+
     const doShout = async (force) => {
       if (!next) return toast('The queue is empty — add players to the list', 'err');
+      confirmedUnpriced = false;
       const okToGo =
         force ||
         !block ||
         (live && live.actualLakh) ||
-        (await confirmDialog({
+        (confirmedUnpriced = await confirmDialog({
           title: 'Move on?',
           message: `<strong>${escapeHtml(block.name)}</strong> is still on the block and the sold price is not entered. Shout ${
             next ? escapeHtml(next.name) : 'the next player'
@@ -175,8 +284,13 @@
 
       setBusy(button, true, 'Shouting…');
       try {
-        const res = await API.post('/api/admin/shout', { force: Boolean(force), timerSeconds: shoutSeconds() });
-        toast(`📣 ${res.shouted.name} is on the block`, 'ok');
+        const res = await API.post('/api/admin/shout', {
+          force: Boolean(force),
+          // the host confirmed "shout next anyway" — that player stays settleable in the ledger
+          allowUnpriced: Boolean(confirmedUnpriced),
+          timerSeconds: shoutSeconds()
+        });
+        toast(`${res.shouted.name} is on the block`, 'ok');
         haptic && haptic(30);
         window.AdminShell.refresh();
       } catch (err) {
@@ -390,7 +504,7 @@
         <div class="results">${UI.resultsHtml(live.results, { max: 10 })}</div>
         <div class="row" style="gap:8px;margin-top:14px;flex-wrap:wrap">
           <a class="btn btn-ghost btn-sm" href="/admin-history">Full report</a>
-          <button class="btn btn-ghost btn-sm" data-id="${live.id}" data-poll-act="export">⬇ Export CSV</button>
+          <button class="btn btn-ghost btn-sm" data-id="${live.id}" data-poll-act="export">Export CSV</button>
           <span class="mute-sm" style="margin-left:auto">Updated live</span>
         </div>
       </div>`;
@@ -447,7 +561,7 @@
       <div class="card" id="rapid-card" style="margin-bottom:16px">
         <div class="card-head">
           <div>
-            <div class="eyebrow">📣 Shout settings</div>
+            <div class="eyebrow">Shout settings</div>
             <div class="card-title" style="margin-top:4px">Round length per player</div>
           </div>
           <span class="pill pill-live">AUTO</span>
@@ -473,7 +587,7 @@
               .join('')}
           </div>
         </div>
-        <a class="btn btn-ghost" href="/admin-players" style="width:100%">📋 Open the auction list</a>
+        <a class="btn btn-ghost" href="/admin-players" style="width:100%">Open the auction list</a>
       </div>
 
       <div class="card">
@@ -511,7 +625,7 @@
     return `
       <div class="bid-admin ${hasPrice ? 'is-set' : ''}" style="margin-top:16px">
         <div class="row-between" style="flex-wrap:wrap;gap:8px">
-          <div class="eyebrow" style="margin:0">💰 Enter the sold price</div>
+          <div class="eyebrow" style="margin:0">Enter the sold price</div>
           ${
             hasPrice
               ? `<span class="pill pill-gold">SOLD ${escapeHtml(poll.actualLabel || '')}</span>`
@@ -548,6 +662,25 @@
 
   function metaLadder() {
     return (window.__bidLadder || []).map((x) => ({ lakh: x.lakh, label: x.label }));
+  }
+
+  /* One fetch at boot: the shout panel, the settle block and the live price panel all use it. */
+  let ladderPromise = null;
+  function ensureLadder() {
+    if (metaLadder().length) return Promise.resolve(metaLadder());
+    if (!ladderPromise) {
+      ladderPromise = API.get('/api/meta')
+        .then((m) => {
+          window.__bidLadder = (m.bid && m.bid.ladder) || [];
+          window.AdminShell.refresh();
+          return metaLadder();
+        })
+        .catch(() => {
+          ladderPromise = null;
+          return [];
+        });
+    }
+    return ladderPromise;
   }
 
   function wireBidPricePanel(poll) {
@@ -649,7 +782,7 @@
     paint();
   }
 
-  /* 📣 Round length for each shout (remembered on this device). */
+  /* Round length for each shout (remembered on this device). */
   function wireRapidRound() {
     const secondsEl = document.getElementById('rr-seconds');
     if (!secondsEl) return;
@@ -892,5 +1025,4 @@
 
   window.AdminShell.ready.then(() => {
     window.AdminShell.onChange(render);
-  });
-})();
+  });})();

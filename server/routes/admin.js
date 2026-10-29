@@ -8,6 +8,7 @@ const state = require('../state');
 const config = require('../config');
 const ladder = require('../bidladder');
 const auction = require('../auction');
+const ledger = require('../ledger');
 
 /* The auction moves fast: a shout opens a 10 second round unless the admin picks otherwise. */
 const SHOUT_DEFAULT_SECONDS = 10;
@@ -972,10 +973,33 @@ router.post('/shout', async (req, res, next) => {
     if (live && req.body?.force !== true) {
       const block = await auction.onBlock();
       if (block && block.poll_id === live.id) {
-        return res.status(409).json({
-          error: `${live.player_name || 'This player'} is still on the block. Enter the sold price or skip them first.`,
-          onBlock: { id: block.id, name: block.name, pollId: live.id }
-        });
+        const hasPrice = live.actual_lakh != null;
+        // The host always gets time to type the hammer price. Pressing SHOUT without one is
+        // allowed after a confirmation (`allowUnpriced`), and that player stays settleable later
+        // from the results ledger — nothing is ever lost by moving on.
+        if (!hasPrice && req.body?.allowUnpriced === true) {
+          await q(
+            `UPDATE polls
+                SET status = 'closed', closed_at = $1, ends_at = NULL, updated_at = $1, revision = revision + 1
+              WHERE id = $2`,
+            [Date.now(), live.id]
+          );
+          await q(
+            "UPDATE auction_players SET status = 'skipped' WHERE poll_id = $1 AND status = 'on_block'",
+            [live.id]
+          );
+          await logActivity(
+            'auction.shout_past',
+            `${block.name} moved on without a sold price — still open in the results ledger`,
+            req.admin.username
+          );
+        } else {
+          return res.status(409).json({
+            error: `${live.player_name || 'This player'} is still on the block. Enter the sold price, or shout the next player anyway.`,
+            onBlock: { id: block.id, name: block.name, pollId: live.id, guessCount: null },
+            needsPrice: !hasPrice
+          });
+        }
       }
     }
 
@@ -1008,6 +1032,15 @@ router.post('/shout', async (req, res, next) => {
         now,
         req.admin.username
       ]
+    );
+
+    /* Exactly one player is ever on the block: anyone left behind (their round was closed
+       without a price) is marked skipped, so the dashboard can never point at the wrong name. */
+    await q(
+      `UPDATE auction_players
+          SET status = 'skipped'
+        WHERE status = 'on_block' AND id <> $1 AND sold_lakh IS NULL`,
+      [player.id]
     );
 
     await q(
@@ -1088,6 +1121,67 @@ router.post('/players/:id/skip', async (req, res, next) => {
     await q('UPDATE auction_players SET status = $1, poll_id = NULL WHERE id = $2', [status, id]);
     await logActivity('auction.skip', `${row.name} marked ${status}`, req.admin.username);
     res.json({ ok: true, counts: await auction.counts() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* -------------------------------- ledger --------------------------------- */
+
+/**
+ * The whole auction in one payload: every player, their stored result, the three closest guesses,
+ * and the overall standings. 70 players = 70 rows and a few thousand guesses — one round trip.
+ */
+router.get('/ledger', async (req, res, next) => {
+  try {
+    res.json(await ledger.buildLedger());
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Ledger as a spreadsheet: one line per player, the three winners in their own columns. */
+router.get('/ledger.csv', async (req, res, next) => {
+  try {
+    const { rows, summary } = await ledger.buildLedger();
+    const head = [
+      '#', 'Player', 'Role', 'Base price', 'Status', 'Sold for', 'Guesses',
+      '1st (closest)', '1st guess', '1st diff',
+      '2nd', '2nd guess', '2nd diff',
+      '3rd', '3rd guess', '3rd diff'
+    ];
+    const lines = [head];
+    for (const r of rows) {
+      const w = [0, 1, 2].map((i) => r.winners[i] || {});
+      lines.push([
+        r.position, r.name, r.role || '', r.baseLabel || '', r.status, r.soldLabel || '', r.guessCount,
+        w[0].name || '', w[0].guessLabel || '', w[0].diffLabel ? `${w[0].diffLabel} off` : '',
+        w[1].name || '', w[1].guessLabel || '', w[1].diffLabel ? `${w[1].diffLabel} off` : '',
+        w[2].name || '', w[2].guessLabel || '', w[2].diffLabel ? `${w[2].diffLabel} off` : ''
+      ]);
+    }
+    lines.push([]);
+    lines.push(['Players', summary.total]);
+    lines.push(['Sold', summary.settled]);
+    lines.push(['Still waiting for a price', summary.awaitingPrice]);
+    lines.push(['Not shouted yet', summary.notShouted]);
+    lines.push(['Total guesses', summary.totalGuesses]);
+    lines.push(['Total spent', summary.spentLabel]);
+
+    const csv = lines
+      .map((row) =>
+        row
+          .map((cell) => {
+            const text = String(cell == null ? '' : cell);
+            return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+          })
+          .join(',')
+      )
+      .join('\n');
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="auction-results.csv"');
+    res.send('\ufeff' + csv);
   } catch (err) {
     next(err);
   }

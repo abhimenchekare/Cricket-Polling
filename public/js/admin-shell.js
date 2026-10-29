@@ -61,7 +61,9 @@
         lastErr = err;
         if (err.status === 401) {
           if (attempt < 2) {
-            await new Promise((r) => setTimeout(r, 700));
+            // Re-check immediately: a genuinely signed-out session answers 401 twice in a row,
+            // so there is nothing to wait for. Only the last attempt backs off.
+            if (attempt === 1) await new Promise((r) => setTimeout(r, 700));
             continue;
           }
           if (allowRedirect) redirectToLogin();

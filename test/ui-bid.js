@@ -126,11 +126,19 @@ async function cleanLeftovers() {
   ok('slider starts at a sensible price', /\d/.test(startValue), startValue);
   await shot(p, 'b1-bid-slider.png');
 
-  /* the actual drag gesture */
+  /* the actual drag gesture — scroll the slider into view first, then drag the thumb */
+  await p.locator('#bid-range').scrollIntoViewIfNeeded();
+  await p.waitForTimeout(200);
+  const rangeInfo = await p.locator('#bid-range').evaluate((el) => ({
+    value: Number(el.value),
+    max: Number(el.max)
+  }));
+  // land well away from the current thumb, but never on an end stop (the +/− checks follow)
+  const targetFraction = rangeInfo.value > rangeInfo.max / 2 ? 0.28 : 0.72;
   const box = await p.locator('#bid-range').boundingBox();
   await p.mouse.move(box.x + box.width * 0.5, box.y + box.height / 2);
   await p.mouse.down();
-  await p.mouse.move(box.x + box.width * 0.12, box.y + box.height / 2, { steps: 12 });
+  await p.mouse.move(box.x + box.width * targetFraction, box.y + box.height / 2, { steps: 12 });
   await p.mouse.up();
   await p.waitForTimeout(400);
   const dragged = await p.locator('#bid-value').innerText();

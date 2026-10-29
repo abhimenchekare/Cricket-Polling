@@ -12,7 +12,7 @@ A complete live polling website for your office cricket auction, built to run **
 
 ---
 
-## What this app does (v3.2.1 — auction list + SHOUT)
+## What this app does (v3.3.1 — auction list + SHOUT)
 
 An office-cricket-auction companion for the audience's phones.
 
@@ -224,7 +224,7 @@ player is shouted. There is a `Stay here` button if someone wants to read it fir
 
 Countdowns under a minute show as plain seconds (`15s`, `8s`); longer ones stay `mm:ss`.
 
-## 4b-bis. ⚡ The Lock-in button answers in ~100 ms (v3.2.1)
+## 4b-bis. ⚡ The Lock-in button answers in ~100 ms (v3.3.1)
 
 The complaint: *"when they select bid submit, it takes 3-4 seconds."* Three separate delays were
 stacked on top of each other, and none of them were the database.
@@ -249,6 +249,59 @@ all. The test enforces it — if a future change reintroduces a blocking call on
 
 The confirmation document itself is also prefetched while the round is open, so the tap has nothing
 left to download.
+
+## 4b-ter. 🏆 Running 70 players: the hammer price, and who won
+
+The host never gets hurried. A round is a round on the phones; the price is a separate step with
+**no deadline at all**.
+
+### The three actions that matter in the room
+
+1. **SHOUT** — the next player goes on the block (10 s by default, one tap to change).
+2. **Type the sold price** — the "Sold price for *player*" block sits under the shout button and
+   stays there **after** the countdown ends, while the next players go up, even 20 minutes later.
+   Press *Declare the three winners* whenever the hammer actually falls.
+3. **Results ledger** (`/admin/results`) — all 70 players, what each sold for, who came 1st/2nd/3rd,
+   and the overall leaderboard.
+
+### Where every result lives
+
+| What | Where it is stored |
+| --- | --- |
+| Each guess | `votes.guess_lakh` — one row per participant per player, enforced by a UNIQUE constraint |
+| The hammer price | `polls.actual_lakh` (+ who entered it, when) |
+| The player's fate | `auction_players.status` = `sold` / `unsold` / `skipped`, plus `sold_lakh` |
+| The winners | **derived on read** from the two above, so correcting a mistyped price re-ranks instantly |
+
+### How the winners are decided
+
+```
+diff = |guess − actual sold price|      ← "as close as possible to the bid"
+sort by diff (ascending)                ← 1st, 2nd, 3rd
+equal diffs → whoever locked their guess in first
+```
+
+Only the top three are named; everybody else still sees their own rank and how far off they were.
+The sold price does **not** have to sit on the slider ladder (₹1.10 Cr is a real result), so the host
+types what actually happened, not a rounded step.
+
+### Shouting on without a price
+
+If a player has no price when you press SHOUT, you get one confirmation:
+*"…is still on the block and the sold price is not entered. Shout … anyway?"*
+Confirm and that round closes without winners — but the player stays in the ledger with every guess
+intact, and you can settle them later from `/admin/results` → **Enter price**.
+
+### Overall leaderboard
+
+1st closest = 3 points · 2nd = 2 · 3rd = 1, summed across every player sold. Ties break on 1st
+places, then on total distance. It is on `/admin/results`, on the projector via `/display`, and for
+the audience on `/results` (`/api/standings`).
+
+### Exports
+
+`/admin/results` → **CSV** gives one row per player with the three winners in their own columns,
+plus totals (players, sold, awaiting price, guesses, total spent).
 
 ## 4c. Admin panel bouncing to the login page — fixed
 
@@ -609,9 +662,10 @@ npm run test:routes                # every page + API route on the deployment
 npm run test:config                # vercel.json / rewrite / no-socket checks
 npm run test:perf                  # perceived load speed
 npm run test:vote-speed            # Lock-in latency (cold-function simulation)
+npm run test:ledger                # 70-player results: stored prices, top-3 winners, leaderboard
 ```
 
-**Current results (local, v3.2.1), all with zero failures:**
+**Current results (local, v3.3.1), all with zero failures:**
 
 | Suite | Checks | What it proves |
 | --- | --- | --- |
@@ -621,15 +675,16 @@ npm run test:vote-speed            # Lock-in latency (cold-function simulation)
 | `ui` | 32 | join, dashboard, projector, mobile layouts, auto-return from the confirmation |
 | `ui-bid` | 28 | the full slider round on an iPhone 13, incl. the bounce back to the poll |
 | **`vote-speed`** | **7** | Lock-in latency, measured warm **and** with every API call delayed 800 ms |
+| **`ledger`** | **32** | 3 rounds end to end: prices stored, 1st/2nd/3rd correct, late settlement, leaderboard, CSV |
 | `ui-rapid` | 18 | 10s…2 min presets, remembered across reloads, used by the next SHOUT |
 | `ui-session` | 30 | admin sign-in/session/logout |
 | `live` | 10 | start→phone 276 ms, vote→projector 123 ms, price→winners 244 ms, fallback polling |
-| `routes` | 17 | `/admin/players` and every other route on a real deployment |
+| `routes` | 21 | `/admin/players` and every other route on a real deployment |
 | `config` | 36 | Vercel rewrites, serverless layout, no Socket.IO / QR / local-file DB |
 | `perf` | 3 | `/api/state` p95 32 ms, poll screen usable in 78 ms |
 
 Screenshots of the browser runs land in `test/screenshots/` (`sh1-auction-list.png`,
-`sh2-shout-splash.png`, `sh3-on-the-block.png`, …).
+`sh2-shout-splash.png`, `lg1-ledger.png`, `lg2-settle-panel.png`, `sh6-confirm-fast.png`, …).
 
 ---
 
@@ -705,4 +760,4 @@ role and base price, and the price you type when the hammer falls. That is all i
 
 ---
 
-*Cricket Auction Live Polling — v3.2.1 · Express + Postgres on Vercel · separate from the auction website.*
+*Cricket Auction Live Polling — v3.3.1 · Express + Postgres on Vercel · separate from the auction website.*

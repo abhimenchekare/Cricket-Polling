@@ -64,7 +64,8 @@ const PLAYER = `UI Player ${Date.now() % 100000}`;
   const admin = await desktop.newPage();
   watch(admin, 'admin');
 
-  await admin.goto(`${BASE}/admin`, { waitUntil: 'networkidle' });
+  await admin.goto(`${BASE}/admin`, { waitUntil: 'domcontentloaded' });
+  await admin.waitForURL('**/admin-login**', { timeout: 8000 }).catch(() => {});
   ok('unauthenticated admin redirects to login', admin.url().includes('/admin-login'));
 
   await admin.fill('#username', 'admin');

@@ -189,7 +189,6 @@ textarea {
 .mute-sm {
   color: var(--text-mute);
   font-size: 12.5px;
-  white-space: nowrap;
 }
 
 /* A .banner is a flex row (icon · copy · action). Inline copy must stay one flex item,

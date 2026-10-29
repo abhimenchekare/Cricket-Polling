@@ -37,6 +37,10 @@
     {
       "source": "/admin/players",
       "destination": "/admin-players"
+    },
+    {
+      "source": "/admin/results",
+      "destination": "/admin-results"
     }
   ],
   "headers": [

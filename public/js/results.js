@@ -5,6 +5,7 @@
 
   const currentEl = document.getElementById('current');
   const archiveEl = document.getElementById('archive');
+  const standingsEl = document.getElementById('standings');
   const connEl = document.getElementById('conn');
 
   function animateBars(root) {
@@ -96,6 +97,71 @@
     });
   }
 
+  /* 🏆 Overall leaderboard — 1st closest = 3 points, 2nd = 2, 3rd = 1, across every player sold. */
+  let lastStandingsAt = 0;
+  async function loadStandings(force) {
+    if (!standingsEl) return;
+    if (!force && Date.now() - lastStandingsAt < 15000) return;
+    lastStandingsAt = Date.now();
+    let data;
+    try {
+      data = await API.get('/api/standings');
+    } catch {
+      return;
+    }
+    if (!data || !data.rounds) {
+      standingsEl.innerHTML = '';
+      return;
+    }
+    const medal = ['#ffd166', '#cfd8e3', '#e0a370'];
+    standingsEl.innerHTML = `
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="eyebrow">🏆 Leaderboard</div>
+            <div class="card-title" style="margin-top:4px">Closest to the sold price</div>
+          </div>
+          <span class="pill pill-gold">${data.rounds} ${data.rounds === 1 ? 'player' : 'players'} sold</span>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>#</th><th>Who</th><th>1st</th><th>2nd</th><th>3rd</th><th>Points</th></tr></thead>
+            <tbody>
+              ${data.standings
+                .slice(0, 10)
+                .map(
+                  (s) => `<tr>
+                    <td><strong style="color:${medal[s.rank - 1] || 'inherit'}">${s.rank}</strong></td>
+                    <td><strong>${escapeHtml(s.name)}</strong></td>
+                    <td>${s.firsts || '·'}</td>
+                    <td>${s.seconds || '·'}</td>
+                    <td>${s.thirds || '·'}</td>
+                    <td><strong>${s.points}</strong></td>
+                  </tr>`
+                )
+                .join('')}
+            </tbody>
+          </table>
+        </div>
+        ${
+          data.latest && data.latest.length
+            ? `<div style="margin-top:14px">
+                 <div class="eyebrow" style="margin-bottom:8px">Just sold</div>
+                 ${data.latest
+                   .map(
+                     (r) => `<div class="mute-sm" style="margin-bottom:6px">
+                        <strong style="color:var(--gold-300,#ffd166)">${escapeHtml(r.player)}</strong> — ${escapeHtml(
+                          r.soldLabel || ''
+                        )}${r.winners.length ? ' · ' + r.winners.map((w) => escapeHtml(w.name)).join(', ') : ''}
+                     </div>`
+                   )
+                   .join('')}
+               </div>`
+            : ''
+        }
+      </div>`;
+  }
+
   function applyState(state) {
     render(state);
   }
@@ -107,6 +173,9 @@
       : '<span class="pill pill-ghost">● Reconnecting…</span>';
   }
 
+  loadStandings(true);
+  setInterval(() => loadStandings(false), 20000);
+
   window.App.createLiveChannel({
     url: '/api/state',
     activeInterval: 3000,
@@ -114,6 +183,7 @@
     onData: (state) => {
       setConn(true);
       applyState(state);
+      loadStandings(false);
     },
     onStatus: setConn
   });

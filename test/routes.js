@@ -27,7 +27,11 @@ const ROUTES = [
   ['/admin/history', 'History'],
   ['/admin-polls', 'Manage Polls'],
   ['/admin-participants', 'Participants'],
-  ['/admin-history', 'History']
+  ['/admin-history', 'History'],
+  ['/admin/players', 'Auction list'],
+  ['/admin-players', 'Auction list'],
+  ['/admin/results', 'Results ledger'],
+  ['/admin-results', 'Results ledger']
 ];
 
 let pass = 0;

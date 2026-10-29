@@ -6,6 +6,7 @@ const { allSettings } = require('../settings');
 const auth = require('../auth');
 const state = require('../state');
 const ladder = require('../bidladder');
+const ledger = require('../ledger');
 const config = require('../config');
 
 const router = express.Router();
@@ -420,6 +421,40 @@ router.get('/history', async (req, res, next) => {
       });
     }
     res.json({ polls: out });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * 🏆 Leaderboard for the audience: the same 3/2/1 rule the admin ledger uses, published only once
+ * at least one player has actually been sold (a guess is only "right" against a real hammer price).
+ */
+router.get('/standings', async (req, res, next) => {
+  try {
+    const { rows, summary, standings } = await ledger.buildLedger();
+    res.json({
+      rounds: summary.settled,
+      players: summary.total,
+      standings: standings.slice(0, 20).map((s) => ({
+        rank: s.rank,
+        name: s.name,
+        firsts: s.firsts,
+        seconds: s.seconds,
+        thirds: s.thirds,
+        points: s.points,
+        exact: s.exact
+      })),
+      latest: rows
+        .filter((r) => r.settled)
+        .slice(-5)
+        .reverse()
+        .map((r) => ({
+          player: r.name,
+          soldLabel: r.soldLabel,
+          winners: r.winners.map((w) => ({ rank: w.rank, name: w.name, guessLabel: w.guessLabel }))
+        }))
+    });
   } catch (err) {
     next(err);
   }
