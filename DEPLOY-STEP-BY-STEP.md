@@ -348,6 +348,73 @@ Project → **Deployments** → click the failed deployment → **Build Logs**. 
 
 ---
 
+## Upgrading an existing database (v2.1 → v2.2, bid rounds)
+
+**Nothing to do manually.** On the next request after deploying, the app compares the schema
+marker in `settings` with the code's version and runs the upgrade:
+
+```sql
+ALTER TABLE polls ADD COLUMN IF NOT EXISTS poll_type / player_name / actual_lakh / ...
+ALTER TABLE votes ADD COLUMN IF NOT EXISTS guess_lakh
+ALTER TABLE votes ALTER COLUMN option_id DROP NOT NULL
+```
+
+All statements are `IF NOT EXISTS`, so they are safe to run repeatedly and safe on a database that
+already has them. Existing polls keep `poll_type = 'choice'`; no votes, participants or settings are
+touched. Verified by running the bid-round suite against a deliberately downgraded database.
+
+If `/api/diag` still reports `schemaVersion: 3` after a redeploy, the old function instance is still
+warm — wait a minute or trigger one more redeploy.
+
+---
+
+## Shipping an update — and proving it actually went live
+
+Nine times out of ten, "the fix didn't work" means the browser is running an **older deployment**.
+`build 2.1.0` is the current version. Check it in three places:
+
+| Check | Current build says | An old build says |
+| --- | --- | --- |
+| `https://YOUR-APP.vercel.app/api/health` | `"build":"2.1.0+<commit>"`, `"features":{"adminTokenHeader":true,…}` | no `build` / no `features` |
+| `https://YOUR-APP.vercel.app/api/diag` | JSON report | `404 {"error":"Not found"}` |
+| Admin dashboard, left sidebar under *Signed in as* | `build 2.1.0 · token-auth` | nothing |
+
+If any of those disagree, the deployment is stale — nothing you do in the panel will change.
+
+### Path A — deploy from your computer (most reliable, ~2 minutes)
+
+This uploads exactly the files on disk, so there is no chance of a partial GitHub upload:
+
+```bash
+npm install -g vercel          # once
+cd cricket-polling-vercel      # the folder that contains vercel.json, api/, public/
+vercel login                   # opens the browser once
+vercel link                    # choose "Link to existing project" → cricket-polling
+vercel --prod                  # builds and promotes to production
+```
+
+`vercel link` matters: without it you create a *second* project with a different URL and a different
+database binding — the classic "I deployed but nothing changed" trap.
+
+Environment variables already set in the Vercel project (Settings → Environment Variables) are used
+as-is; the CLI does not overwrite them.
+
+### Path B — deploy from GitHub
+
+If you upload through the browser, GitHub **replaces files individually** — it is easy to leave old
+ones behind. Cleanest version:
+
+1. On GitHub, open the repo → **Add file → Upload files**.
+2. Drag in the contents of the ZIP *at the repo root*: `api/`, `public/`, `server/`, `scripts/`,
+   `sql/`, `test/`, `package.json`, `vercel.json`, `README.md`, `DEPLOY-STEP-BY-STEP.md`.
+3. Confirm the upload overwrote existing paths (**Commit changes** with a message like `v2.1.0`).
+4. Vercel → **Deployments** → wait for **Ready** on the new `main` deployment.
+
+Then hard-refresh the panel once (**Ctrl/Cmd + Shift + R**) — the pages now carry `?v=2.1.0` on every
+script, so the browser cannot keep serving old JavaScript.
+
+---
+
 ## Troubleshooting (most common issues first)
 
 | What you see | Cause & fix |

@@ -130,6 +130,51 @@ const ok = (name, cond, extra = '') => {
   await page.waitForTimeout(2500);
   ok('sign out returns to the login page', page.url().includes('admin-login'), page.url());
 
+  /* ------------------------------------------------------------------ */
+  /* Cookie-blocked browsers / proxies: the panel must still work.       */
+  /* This is the extra safety net for "every button logs me out".        */
+  /* ------------------------------------------------------------------ */
+  console.log('\n🚫 Cookies blocked entirely (proxy / webview / privacy mode)');
+  const blockedCtx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const bp = await blockedCtx.newPage();
+  bp.on('pageerror', (e) => errors.push('cookieblocked pageerror: ' + e.message));
+
+  // Strip every Set-Cookie header so the browser can never keep a session cookie.
+  await blockedCtx.route('**/*', async (route) => {
+    const response = await route.fetch();
+    const headers = { ...response.headers() };
+    delete headers['set-cookie'];
+    await route.fulfill({ response, headers });
+  });
+
+  await bp.goto(`${BASE}/admin-login`, { waitUntil: 'networkidle' });
+  await bp.fill('#username', 'admin');
+  await bp.fill('#password', 'admin123');
+  await bp.click('#login-btn');
+  await bp.waitForURL('**/admin', { timeout: 12000 });
+  await bp.waitForTimeout(1800);
+
+  const storedToken = await bp.evaluate(() => localStorage.getItem('cp_admin_token'));
+  ok('login survives with zero cookies (token stored)', Boolean(storedToken) && storedToken.length > 20);
+  await blockedCtx.clearCookies(); // make certain no session cookie survives
+  const cookieCount = (await blockedCtx.cookies()).filter((c) => c.name === 'cp_admin').length;
+  ok('browser really has no admin cookie', cookieCount === 0);
+
+  for (const href of ['/admin/polls', '/admin/participants', '/admin/history', '/admin']) {
+    await bp.goto(BASE + href, { waitUntil: 'networkidle' });
+    await bp.waitForTimeout(1500);
+    const url = bp.url();
+    ok(`cookie-less ${href} stays signed in`, url.includes(href.replace(/\/$/, '')) && !url.includes('admin-login'), url);
+  }
+
+  const blockedMe = await bp.evaluate(async () => {
+    const r = await fetch('/api/admin/me', { headers: { 'x-admin-token': localStorage.getItem('cp_admin_token') } });
+    return r.status;
+  });
+  ok('API authorises by header alone', blockedMe === 200, `status ${blockedMe}`);
+
+  await blockedCtx.close();
+
   await browser.close();
   console.log('\n' + '='.repeat(52));
   console.log(`  Admin session: ${pass} passed, ${fail} failed`);

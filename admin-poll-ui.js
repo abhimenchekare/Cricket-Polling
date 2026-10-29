@@ -109,7 +109,28 @@
   }
 
   function resultsHtml(results, { max = 8 } = {}) {
-    if (!results || !results.rows.length) return '<div class="empty">No votes yet</div>';
+    // Bid rounds rank guesses instead of options, so they get their own compact view.
+    if (results && results.kind === 'bid') {
+      if (!results.actualLakh) {
+        return `<div class="empty">${results.totalGuesses || 0} guesses — enter the sold price to rank them</div>`;
+      }
+      if (!results.winners.length) return '<div class="empty">Sold price entered, but nobody guessed</div>';
+      const medal = ['🥇', '🥈', '🥉'];
+      return results.winners
+        .map(
+          (w) => `
+        <div class="result-row ${w.rank === 1 ? 'is-leader' : ''}">
+          <div class="result-top">
+            <span class="result-label">${medal[w.rank - 1] || '#' + w.rank} ${escapeHtml(w.name)}</span>
+            <span class="result-votes">${escapeHtml(w.guessLabel)}</span>
+            <span class="result-pct">${escapeHtml(w.diffLabel)}</span>
+          </div>
+          <div class="bar-track"><div class="bar-fill" data-w="${w.rank === 1 ? 100 : w.rank === 2 ? 70 : 45}"></div></div>
+        </div>`
+        )
+        .join('');
+    }
+    if (!results || !results.rows || !results.rows.length) return '<div class="empty">No votes yet</div>';
     return results.rows
       .slice(0, max)
       .map(
@@ -150,6 +171,16 @@
   }
 
   function metaChips(poll) {
+    if (poll.pollType === 'bid') {
+      return `
+        ${statusPill(poll.status)}
+        <span class="pill pill-gold">🎯 BID RANGE</span>
+        <span class="pill pill-ghost">${poll.totalVotes} guesses</span>
+        <span class="pill pill-ghost">⏱ ${poll.timerSeconds ? poll.timerSeconds + 's' : 'No timer'}</span>
+        ${poll.actualLakh ? `<span class="pill pill-ghost">💰 sold ${escapeHtml(poll.actualLabel || '')}</span>` : ''}
+        ${poll.playerName ? `<span class="pill pill-ghost">👤 ${escapeHtml(poll.playerName)}</span>` : ''}
+      `;
+    }
     return `
       ${statusPill(poll.status)}
       <span class="pill pill-ghost">🗳️ ${poll.totalVotes} votes</span>

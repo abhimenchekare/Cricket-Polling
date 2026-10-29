@@ -1,6 +1,6 @@
 {
   "name": "cricket-polling-vercel",
-  "version": "2.0.0",
+  "version": "2.2.0",
   "private": true,
   "description": "Live polling website for an office cricket auction \u2014 Vercel + Postgres edition",
   "scripts": {
@@ -10,7 +10,9 @@
     "reset": "node scripts/reset.js",
     "demo-data": "node scripts/demo-data.js",
     "test:e2e": "node test/e2e.js",
-    "vercel-build": "node scripts/vercel-build.js"
+    "vercel-build": "node scripts/vercel-build.js",
+    "test:bid": "node test/bid.js",
+    "test:ui-bid": "node test/ui-bid.js"
   },
   "engines": {
     "node": ">=18"

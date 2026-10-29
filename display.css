@@ -653,3 +653,33 @@
     font-size: clamp(24px, 7vw, 38px);
   }
 }
+
+/* ── bid round on the projector ── */
+.dp-bid-player {
+  font-size: clamp(30px, 6vw, 86px);
+  font-weight: 900;
+  letter-spacing: -1.5px;
+  line-height: 1.02;
+  background: linear-gradient(120deg, #fff, var(--gold-300, #ffd166));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  margin-top: clamp(6px, 1vw, 16px);
+}
+
+.dp-bid-sold {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 10px 6px 16px;
+  color: var(--gold-300, #ffd166);
+}
+
+.dp-bid-sold strong {
+  font-size: clamp(24px, 3vw, 48px);
+  font-weight: 900;
+}
+
+.dp-bid-winner {
+  animation: fadeUp 0.4s ease both;
+}

@@ -441,3 +441,176 @@
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* ══════════════════════════ bid range poll ══════════════════════════ */
+
+.bid-player {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 10px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: linear-gradient(120deg, rgba(255, 199, 66, 0.16), rgba(255, 199, 66, 0.04));
+  border: 1px solid rgba(255, 199, 66, 0.35);
+  color: var(--gold-300, #ffd166);
+  font-weight: 800;
+  font-size: 17px;
+  letter-spacing: 0.2px;
+}
+
+.bid-player-tag {
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: rgba(255, 199, 66, 0.2);
+  color: var(--gold-300, #ffd166);
+}
+
+.bid-slider-wrap {
+  padding: 18px 4px 6px;
+}
+
+.bid-value {
+  font-family: var(--font-num, inherit);
+  font-size: clamp(38px, 12vw, 56px);
+  font-weight: 800;
+  text-align: center;
+  line-height: 1.05;
+  letter-spacing: -1px;
+  background: linear-gradient(120deg, #fff, var(--green-400, #35d07f));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  margin-bottom: 4px;
+}
+
+.bid-value.pop {
+  animation: bid-pop 0.18s ease-out;
+}
+
+@keyframes bid-pop {
+  from {
+    transform: scale(0.94);
+    opacity: 0.7;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.bid-track-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0 8px;
+}
+
+.bid-track {
+  flex: 1;
+  min-width: 0;
+}
+
+/* the drag bar itself: fat, thumb-friendly, brand coloured */
+.bid-locked-value {
+  font-family: var(--font-num, inherit);
+  font-size: 40px;
+  font-weight: 800;
+  margin-top: 10px;
+  color: var(--gold-300, #ffd166);
+}
+
+/* results: winners + distribution */
+.bid-you {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--card-border, rgba(255, 255, 255, 0.1));
+}
+
+.bid-you.is-winner {
+  background: rgba(255, 199, 66, 0.12);
+  border-color: rgba(255, 199, 66, 0.45);
+}
+
+.bid-rank {
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--gold-300, #ffd166);
+}
+
+.bid-winners {
+  display: grid;
+  gap: 8px;
+}
+
+.bid-winner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--card-border, rgba(255, 255, 255, 0.09));
+  animation: fadeUp 0.35s ease both;
+}
+
+.bid-winner.rank-1 {
+  background: linear-gradient(120deg, rgba(255, 199, 66, 0.2), rgba(255, 199, 66, 0.04));
+  border-color: rgba(255, 199, 66, 0.55);
+}
+
+.bid-winner.rank-2 {
+  border-color: rgba(198, 210, 226, 0.4);
+}
+
+.bid-winner.rank-3 {
+  border-color: rgba(206, 145, 92, 0.45);
+}
+
+.bid-medal {
+  font-size: 24px;
+  width: 30px;
+  text-align: center;
+}
+
+.bid-winner-name {
+  font-weight: 800;
+  font-size: 16px;
+}
+
+.bid-dist {
+  display: grid;
+  gap: 8px;
+}
+
+.bid-dist-row {
+  display: grid;
+  grid-template-columns: 78px 1fr 30px;
+  align-items: center;
+  gap: 10px;
+}
+
+.bid-dist-label {
+  font-size: 12px;
+  color: var(--text-dim, #9aa7bd);
+  white-space: nowrap;
+}
+
+.bid-dist-row.is-actual .bid-dist-label {
+  color: var(--gold-300, #ffd166);
+  font-weight: 800;
+}
+
+.bid-dist-count {
+  font-size: 12px;
+  text-align: right;
+  color: var(--text, #fff);
+  font-weight: 700;
+}

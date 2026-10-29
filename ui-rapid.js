@@ -48,6 +48,27 @@ async function shot(page, name) {
 }
 
 (async () => {
+  // close anything left live from other suites so the rapid round is the current poll
+  {
+    const login = await fetch(`${BASE}/api/admin/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: process.env.ADMIN_USERNAME || 'admin',
+        password: process.env.ADMIN_PASSWORD || 'admin123'
+      })
+    });
+    const cookie = (login.headers.getSetCookie() || []).map((c) => c.split(';')[0]).join('; ');
+    const state = await fetch(`${BASE}/api/admin/state`, { headers: { cookie } }).then((r) => r.json());
+    for (const poll of state.polls.filter((x) => ['active', 'paused'].includes(x.status))) {
+      await fetch(`${BASE}/api/admin/polls/${poll.id}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie },
+        body: JSON.stringify({ action: 'close' })
+      });
+    }
+  }
+
   const browser = await chromium.launch();
 
   /* ------------------------------ admin ------------------------------ */
@@ -97,7 +118,8 @@ async function shot(page, name) {
 
   /* --------------------------- participant --------------------------- */
   console.log('\n📱 Rapid round — participant votes');
-  await p.waitForTimeout(2500);
+  // idle pages poll every ~8 s, so give the phone time to pick the round up
+  await p.locator('.option').first().waitFor({ timeout: 20000 }).catch(() => {});
   ok('participant sees the rapid round', (await p.locator('.option').count()) >= 3);
   await shot(p, 'r3-participant-rapid.png');
   await p.locator('.option').first().click();

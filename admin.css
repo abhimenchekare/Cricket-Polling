@@ -764,3 +764,27 @@ table.data tr:hover td {
     grid-template-columns: repeat(3, 1fr);
   }
 }
+
+/* ══════════════════════ bid round (admin) ══════════════════════ */
+
+.bid-admin {
+  margin-top: 16px;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 199, 66, 0.28);
+  background: linear-gradient(150deg, rgba(255, 199, 66, 0.09), rgba(255, 255, 255, 0.02));
+}
+
+.bid-admin.is-set {
+  border-color: rgba(53, 208, 127, 0.4);
+  background: linear-gradient(150deg, rgba(53, 208, 127, 0.08), rgba(255, 255, 255, 0.02));
+}
+
+.bid-admin-value {
+  font-family: var(--font-num, inherit);
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  color: var(--gold-300, #ffd166);
+  line-height: 1.1;
+}

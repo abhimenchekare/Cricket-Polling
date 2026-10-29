@@ -82,6 +82,18 @@
     });
   }
 
+  async function paintBuild() {
+    try {
+      const h = await API.get('/api/health');
+      document.querySelectorAll('[data-build]').forEach((el) => {
+        el.textContent = `build ${h.build || '?'}${h.features && h.features.adminTokenHeader ? ' · token-auth' : ''}`;
+        el.title = 'If this does not match the version you just deployed, the deployment is stale.';
+      });
+    } catch {
+      /* non-fatal */
+    }
+  }
+
   function markActiveNav() {
     const path = location.pathname.replace(/\/$/, '') || '/admin';
     document.querySelectorAll('[data-nav]').forEach((el) => {
@@ -105,6 +117,7 @@
         } catch {
           /* ignore */
         }
+        window.App.clearAdminToken();
         window.location.href = '/admin-login';
       });
     });
@@ -184,6 +197,7 @@
     const res = await guard({ allowRedirect: true });
     if (!res) return;
     paintAdminName();
+    paintBuild();
     markActiveNav();
     wireLogout();
     await loadState();
@@ -193,6 +207,14 @@
       if (banner) banner.classList.remove('hidden');
     }
   }
+
+  /* Password change wipes old sessions; adopt the fresh token so we don't self-logout. */
+  window.addEventListener('app:new-admin-token', (e) => {
+    if (e.detail && e.detail.token) {
+      window.App.setAdminToken(e.detail.token);
+      me = me || {};
+    }
+  });
 
   window.AdminShell = {
     boot,

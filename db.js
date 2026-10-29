@@ -175,7 +175,7 @@ function init() {
 
   initPromise = (async () => {
     // 1) Schema — skipped on later cold starts via a version marker (keeps cold starts fast)
-    const CURRENT_SCHEMA_VERSION = '3';
+    const CURRENT_SCHEMA_VERSION = '4';
     let schemaReady = false;
     try {
       const marker = await pool.query("SELECT value FROM settings WHERE key = 'schema_version' LIMIT 1");

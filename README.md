@@ -175,6 +175,56 @@ Common verdicts:
   one you signed into (e.g. Neon integration added twice, or a Preview vs Production mismatch).
 - **Reachable = NO** → Neon suspended/limits reached, or `DATABASE_URL` missing on *this* deployment.
 
+## 4e. 🎯 Bid range rounds — "what will this player sell for?"
+
+This is the auction-specific round type: the host names a player, the room guesses the hammer
+price on a **drag bar**, then the host types the sold price and three winners are declared.
+
+### Creating the round
+
+Admin → **Polls → + New poll** → poll type **🎯 Bid range** → enter the **player name**
+(the question auto-fills as *"What will be the bid range for &lt;player&gt; player?"*, editable).
+No answer options needed; pick a countdown (20 s default) → **Save & start**.
+
+### What participants see
+
+A single **drag bar** across the full price ladder, with a huge live readout, `−` / `+` fine-tune
+buttons and quick chips (20 L · 1 Cr · 5 Cr · 10 Cr · 20 Cr · 30 Cr). One guess per participant per
+player; the guess is locked for good once submitted.
+
+**The ladder** (81 steps, exactly like the auction board):
+
+| Range | Step |
+| --- | --- |
+| 20 L, 40 L, 60 L, 80 L | — |
+| 1.00 Cr → 9.75 Cr | 0.25 Cr |
+| 10.0 Cr → 30.0 Cr | 0.50 Cr |
+
+### Declaring the winners
+
+When the bidding ends, the live card on the dashboard shows **💰 Enter the sold price** with the same
+slider. Slide to the hammer price → **Declare winners**.
+
+- The round closes and the results appear on every phone and on the projector instantly.
+- **Any** price can be entered, on or off the ladder (a player can sell for 1.10 Cr) — type it via the
+  slider or send it straight to the API. Guesses must be on the ladder; the sold price need not be.
+- The **three closest guesses** win, ranked 🥇 🥈 🥉. Distance is measured on the ladder, so
+  `1.25 Cr` vs a `1.10 Cr` sale is "25 L over".
+- **Ties** are broken by who locked their guess in **first** — so there is always a clean 1st/2nd/3rd.
+- Each participant sees their own guess, distance, direction and rank (even if they did not win).
+- Entered the wrong price? Slide again and **Update price & re-rank** — or **Clear price** to take the
+  result back down.
+
+### Reports
+
+History & reports → CSV for a bid round contains the ranked table (rank, winner flag, participant,
+guess, difference, direction, timestamp) plus the guess distribution.
+
+### Why guesses are stored in lakh
+
+Every price is an integer number of lakh (`100` = 1.00 Cr), so "closest" is exact integer arithmetic —
+no floating-point rounding can ever make two different guesses look equal.
+
 ## 5. Pages
 
 | Page | URL |
@@ -191,6 +241,31 @@ Common verdicts:
 | Full-screen display | `/display` |
 
 ---
+
+## 5b. Is my deployment current?
+
+The current build is **2.1.0**. Verify with any of:
+
+- `GET /api/health` → `"build":"2.1.0+<commit>"` and `"features":{"adminTokenHeader":true,…}`
+- `GET /api/diag` → returns JSON (a `404` means the deployment is old)
+- Dashboard sidebar → `build 2.1.0 · token-auth`
+
+Assets are requested as `/js/app.js?v=2.1.0`, so a redeploy is never masked by a cached script — but
+do one hard refresh (**Ctrl/Cmd + Shift + R**) after deploying.
+
+Full instructions: `DEPLOY-STEP-BY-STEP.md` → *Shipping an update — and proving it actually went live*.
+
+## 5c. Why the admin panel can no longer log you out
+
+Admin sessions now travel **two ways**:
+
+1. the `cp_admin` cookie (normal browsers), and
+2. an `x-admin-token` header that the panel keeps in `localStorage` and sends on every admin request.
+
+If a proxy, webview, privacy mode or corporate device drops the cookie, the header still authorises
+the request — and the server re-issues the cookie for subsequent page loads. Combined with the
+retry-on-transient-error layer and the *Reconnect* banner, a working session can no longer be turned
+into a surprise logout by one flaky request.
 
 ## 6. Local development & tests
 

@@ -70,7 +70,11 @@
             <div class="stat"><div class="stat-value">${poll.anonymous ? 'Yes' : 'No'}</div><div class="stat-label">Anonymous</div></div>
           </div>
           <div class="results">
-            ${poll.results.rows.map((r) => rowHtml(r, poll.results.leadingOptionId, myVoteId)).join('')}
+            ${
+              poll.results.kind === 'bid'
+                ? window.App.bidResultRows(poll.results)
+                : poll.results.rows.map((r) => rowHtml(r, poll.results.leadingOptionId, myVoteId)).join('')
+            }
           </div>
         </div>`;
       animateBars(currentEl);
@@ -91,7 +95,11 @@
                  <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
                </button>
                <div class="accordion-body">
-                 <div class="results">${h.results.rows.map((r) => rowHtml(r, h.results.leadingOptionId, null)).join('')}</div>
+                 <div class="results">${
+                   h.results.kind === 'bid'
+                     ? window.App.bidResultRows(h.results)
+                     : h.results.rows.map((r) => rowHtml(r, h.results.leadingOptionId, null)).join('')
+                 }</div>
                  <p class="mute-sm" style="margin-top:8px">${h.totalVotes} votes · closed ${timeAgo(h.closedAt)} · ${formatDate(h.closedAt)}</p>
                </div>
              </div>`).join('')}

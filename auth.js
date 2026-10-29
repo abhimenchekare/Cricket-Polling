@@ -146,6 +146,22 @@ async function isDefaultPassword(adminId) {
   }
 }
 
+/**
+ * The admin session token can arrive two ways:
+ *   1. the `cp_admin` cookie (normal browsers)
+ *   2. an `x-admin-token` header sent by the panel (survives cookie blocking, webviews,
+ *      proxies and anything else that eats Set-Cookie)
+ * Whichever arrives first wins; if the header works and the cookie is missing we re-set it.
+ */
+function adminTokenFrom(req) {
+  const cookieToken = req.cookies?.[ADMIN_COOKIE];
+  if (cookieToken) return { token: cookieToken, source: 'cookie' };
+  const header = req.get('x-admin-token') || req.get('authorization') || '';
+  const cleaned = String(header).replace(/^Bearer\s+/i, '').trim();
+  if (cleaned) return { token: cleaned, source: 'header' };
+  return { token: null, source: null };
+}
+
 /* ------------------------------- middleware ------------------------------ */
 
 async function attachIdentity(req, res, next) {
@@ -159,8 +175,17 @@ async function attachIdentity(req, res, next) {
     console.error('[auth] participant lookup failed:', err.message);
     if (isTransient(err)) req.identityUnknown = true;
   }
+  const adminToken = adminTokenFrom(req);
+  req.adminTokenSource = adminToken.source;
   try {
-    req.admin = await getAdminByToken(req.cookies?.[ADMIN_COOKIE]);
+    req.admin = await getAdminByToken(adminToken.token);
+    // Header auth worked but the cookie is gone: restore it so later page loads work too.
+    if (req.admin && adminToken.source === 'header' && !req.cookies?.[ADMIN_COOKIE]) {
+      res.cookie(ADMIN_COOKIE, adminToken.token, {
+        ...cookieOptions,
+        maxAge: HOURS * 60 * 60 * 1000
+      });
+    }
   } catch (err) {
     console.error('[auth] admin lookup failed:', err.message);
     if (isTransient(err)) req.identityUnknown = true;
@@ -208,6 +233,7 @@ module.exports = {
   changeAdminPassword,
   isDefaultPassword,
   attachIdentity,
+  adminTokenFrom,
   retryable,
   requireParticipant,
   requireAdmin
