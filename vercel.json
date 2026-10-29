@@ -24,15 +24,15 @@
     },
     {
       "source": "/admin/polls",
-      "destination": "/admin-polls.html"
+      "destination": "/admin-polls"
     },
     {
       "source": "/admin/participants",
-      "destination": "/admin-participants.html"
+      "destination": "/admin-participants"
     },
     {
       "source": "/admin/history",
-      "destination": "/admin-history.html"
+      "destination": "/admin-history"
     }
   ],
   "headers": [

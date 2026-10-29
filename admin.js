@@ -1,944 +1,745 @@
-'use strict';
+/* Admin dashboard */
+(function () {
+  'use strict';
+  const { API, toast, escapeHtml, confirmDialog, setBusy, formatDate, timeAgo, haptic } = window.App;
+  const UI = window.AdminPollUI;
 
-const express = require('express');
-const { q, one, logActivity } = require('../db');
-const { allSettings, setSetting } = require('../settings');
-const auth = require('../auth');
-const state = require('../state');
-const config = require('../config');
-const ladder = require('../bidladder');
-
-const router = express.Router();
-
-/* --------------------------------- login --------------------------------- */
-
-const attempts = new Map();
-function loginAllowed(ip) {
-  const now = Date.now();
-  const entry = attempts.get(ip);
-  if (!entry || now > entry.resetAt) {
-    attempts.set(ip, { count: 1, resetAt: now + 60_000 });
-    return true;
-  }
-  entry.count += 1;
-  return entry.count <= 10;
-}
-
-function clientIp(req) {
-  return (req.headers['x-forwarded-for'] || req.ip || 'unknown').split(',')[0].trim();
-}
-
-router.post('/login', async (req, res, next) => {
-  try {
-    if (!loginAllowed(clientIp(req))) {
-      return res.status(429).json({ error: 'Too many login attempts. Try again in a minute.' });
-    }
-    const { username, password } = req.body || {};
-    const admin = await auth.verifyAdminCredentials(username, password);
-    if (!admin) return res.status(401).json({ error: 'Invalid username or password' });
-
-    const token = await auth.createAdminSession(admin.id);
-    res.cookie(auth.ADMIN_COOKIE, token, {
-      ...auth.cookieOptions,
-      maxAge: Number(process.env.ADMIN_SESSION_HOURS || 12) * 60 * 60 * 1000
-    });
-    await logActivity('admin.login', `${admin.username} signed in`, admin.username);
-    res.json({
-      ok: true,
-      token, // the panel stores this and sends it as x-admin-token (cookie fallback)
-      admin: { id: admin.id, username: admin.username, displayName: admin.display_name }
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-router.post('/logout', async (req, res, next) => {
-  try {
-    const token = req.cookies?.[auth.ADMIN_COOKIE];
-    if (token) await q('DELETE FROM admin_sessions WHERE token = $1', [token]);
-    res.clearCookie(auth.ADMIN_COOKIE, { path: '/' });
-    res.json({ ok: true });
-  } catch (err) {
-    next(err);
-  }
-});
-
-router.get('/me', async (req, res) => {
-  if (!req.admin) return res.status(401).json({ error: 'Not signed in' });
-  if (req.adminTokenSource === 'header') res.set('X-Admin-Auth', 'header');
-  res.json({
-    admin: {
-      id: req.admin.id,
-      username: req.admin.username,
-      displayName: req.admin.display_name
-    },
-    defaultPasswordInUse: await auth.isDefaultPassword(req.admin.id)
-  });
-});
-
-router.post('/password', auth.requireAdmin, async (req, res, next) => {
-  try {
-    const { currentPassword, newPassword } = req.body || {};
-    const result = await auth.changeAdminPassword(req.admin.id, currentPassword, newPassword);
-    if (!result.ok) return res.status(400).json({ error: result.error });
-
-    const token = await auth.createAdminSession(req.admin.id);
-    res.cookie(auth.ADMIN_COOKIE, token, {
-      ...auth.cookieOptions,
-      maxAge: Number(process.env.ADMIN_SESSION_HOURS || 12) * 60 * 60 * 1000
-    });
-    await logActivity('admin.password_changed', 'Admin password updated', req.admin.username);
-    res.json({ ok: true, token });
-  } catch (err) {
-    next(err);
-  }
-});
-
-/* Every route below needs an admin session */
-router.use(auth.requireAdmin);
-
-router.get('/state', async (req, res, next) => {
-  try {
-    res.set('Cache-Control', 'no-store, max-age=0');
-    res.json(await state.buildAdminState());
-  } catch (err) {
-    next(err);
-  }
-});
-
-/* ---------------------------- poll validation ---------------------------- */
-
-function parsePollPayload(body) {
-  const pollType = body?.pollType === 'bid' ? 'bid' : 'choice';
-  const playerName = String(body?.playerName || '').trim().slice(0, 80) || null;
-  let question = String(body?.question || '').trim().slice(0, 200);
-  const description = String(body?.description || '').trim().slice(0, 400) || null;
-  const category = String(body?.category || '').trim().slice(0, 60) || null;
-  const showResults = ['never', 'during', 'after'].includes(body?.showResults)
-    ? body.showResults
-    : 'after';
-  const anonymous = body?.anonymous ? 1 : 0;
-
-  let timerSeconds = Number(body?.timerSeconds);
-  if (!Number.isFinite(timerSeconds) || timerSeconds < 0) timerSeconds = config.defaultTimerSeconds;
-  timerSeconds = Math.min(Math.round(timerSeconds), 3600);
-
-  const rawOptions = Array.isArray(body?.options) ? body.options : [];
-  const options = rawOptions
-    .map((o) => ({
-      label: String(o?.label ?? o ?? '').replace(/\s+/g, ' ').trim().slice(0, 120),
-      emoji: String(o?.emoji || '').trim().slice(0, 8) || null
-    }))
-    .filter((o) => o.label.length > 0);
-
-  const errors = [];
-  if (pollType === 'bid') {
-    if (!playerName) errors.push('Player name is required for a bid range poll');
-    if (!question) question = `What will be the bid range for ${playerName} player?`;
-  } else if (question.length < 5) {
-    errors.push('Question must be at least 5 characters');
-  }
-  if (pollType === 'choice') {
-    if (options.length < 2) errors.push('Add at least 2 answer options');
-    if (options.length > 10) errors.push('A poll can have at most 10 options');
-  }
-
-  return {
-    pollType,
-    playerName,
-    question,
-    description,
-    category: category || (pollType === 'bid' ? 'Bid range' : null),
-    showResults,
-    anonymous,
-    timerSeconds,
-    options: pollType === 'bid' ? [] : options,
-    errors
+  const els = {
+    kpis: document.getElementById('dash-kpis'),
+    live: document.getElementById('live-control'),
+    results: document.getElementById('dash-results'),
+    queue: document.getElementById('dash-queue'),
+    quick: document.getElementById('dash-quick'),
+    activity: document.getElementById('dash-activity')
   };
-}
 
-async function replaceOptions(pollId, options) {
-  await q('DELETE FROM options WHERE poll_id = $1', [pollId]);
-  for (let i = 0; i < options.length; i++) {
-    await q('INSERT INTO options (poll_id, label, emoji, position) VALUES ($1, $2, $3, $4)', [
-      pollId,
-      options[i].label,
-      options[i].emoji,
-      i
-    ]);
+  let tickOffset = 0;
+
+  /* ------------------------------ rendering ------------------------------ */
+
+  function render(state) {
+    tickOffset = state.serverTime - Date.now();
+    renderKpis(state);
+    renderLive(state);
+    renderResults(state);
+    renderQueue(state);
+    renderQuick(state);
+    renderActivity(state);
+    UI.animateBars(document);
   }
-}
 
-/** Keeps option IDs stable when editing a poll that has no votes yet. */
-async function syncOptions(pollId, options) {
-  const existing = await q(
-    'SELECT * FROM options WHERE poll_id = $1 ORDER BY position, id',
-    [pollId]
-  );
-  const used = new Set();
-  for (let index = 0; index < options.length; index++) {
-    const o = options[index];
-    const labelMatch = existing.find((e) => !used.has(e.id) && e.label.trim() === o.label);
-    const spare = existing.find((e) => !used.has(e.id));
-    const target = labelMatch || spare;
-    if (target) {
-      used.add(target.id);
-      await q('UPDATE options SET label = $1, emoji = $2, position = $3 WHERE id = $4', [
-        o.label,
-        o.emoji,
-        index,
-        target.id
-      ]);
-    } else {
-      await q('INSERT INTO options (poll_id, label, emoji, position) VALUES ($1, $2, $3, $4)', [
-        pollId,
-        o.label,
-        o.emoji,
-        index
-      ]);
+  function renderKpis(state) {
+    const live = state.polls.find((p) => p.status === 'active');
+    const s = state.stats;
+    els.kpis.innerHTML = `
+      <div class="kpi"><div class="kpi-value">${s.participants}</div><div class="kpi-label">Participants</div></div>
+      <div class="kpi gold"><div class="kpi-value">${s.totalVotes}</div><div class="kpi-label">Votes cast</div></div>
+      <div class="kpi"><div class="kpi-value">${s.onlineParticipants}</div><div class="kpi-label">Online now</div></div>
+      <div class="kpi"><div class="kpi-value">${live ? (live.totalVotes) : '—'}</div><div class="kpi-label">${live ? 'Votes on live poll' : 'No live poll'}</div></div>
+    `;
+  }
+
+  function renderLive(state) {
+    const live = state.polls.find((p) => p.status === 'active') || state.polls.find((p) => p.status === 'paused');
+    if (!live) {
+      const nextDraft = state.polls.filter((p) => p.status === 'draft').slice(-1)[0];
+      els.live.innerHTML = `
+        <div class="card card-hero">
+          <div class="card-head">
+            <div>
+              <div class="eyebrow">Live control</div>
+              <div class="card-title" style="margin-top:4px">No poll is running</div>
+            </div>
+            <span class="pill pill-draft">IDLE</span>
+          </div>
+          <p class="muted" style="font-size:14px">
+            ${nextDraft ? 'Start your next poll whenever the room is ready.' : 'Create a poll to get started.'}
+          </p>
+          <div class="poll-actions" style="margin-top:14px">
+            ${nextDraft ? `<button class="btn btn-primary" data-start="${nextDraft.id}">▶ Start: ${escapeHtml(nextDraft.question.slice(0, 38))}${nextDraft.question.length > 38 ? '…' : ''}</button>` : ''}
+            <a class="btn btn-ghost" href="/admin-polls">+ New poll</a>
+            <a class="btn btn-ghost" href="/display" target="_blank" rel="noopener">🖥 Big screen</a>
+          </div>
+        </div>`;
+      els.live.querySelectorAll('[data-start]').forEach((btn) =>
+        btn.addEventListener('click', () => UI.handleAction('start', btn.dataset.start))
+      );
+      return;
     }
-  }
-  for (const e of existing) {
-    if (!used.has(e.id)) await q('DELETE FROM options WHERE id = $1', [e.id]);
-  }
-}
 
-/* -------------------------------- polls CRUD ----------------------------- */
+    const isPaused = live.status === 'paused';
+    els.live.innerHTML = `
+      <div class="card card-hero">
+        <div class="card-head">
+          <div>
+            <div class="eyebrow">Live control</div>
+            <div class="card-title" style="margin-top:4px;font-size:19px;line-height:1.25">${escapeHtml(live.question)}</div>
+            ${live.pollType === 'bid' ? `<div class="mute-sm" style="margin-top:6px">🎯 Bid range · <strong style="color:var(--gold-300)">${escapeHtml(live.playerName || 'player')}</strong></div>` : ''}
+          </div>
+          ${isPaused ? '<span class="pill pill-paused">PAUSED</span>' : '<span class="pill pill-live"><span class="dot"></span>LIVE</span>'}
+        </div>
+        <div class="row" style="gap:12px;flex-wrap:wrap;margin-bottom:14px">
+          <div class="timer" id="admin-timer" style="font-size:22px">
+            <div class="timer-ring" id="admin-ring" style="--pct:100"><span>⏱</span></div>
+            <span id="admin-timer-text">--:--</span>
+          </div>
+          <div class="vote-count">${live.pollType === 'bid' ? '🎯' : '🗳️'} <strong>${live.totalVotes}</strong> ${live.pollType === 'bid' ? window.App.plural(live.totalVotes, 'guess', 'guesses') : 'votes'}</div>
+          <div class="vote-count">👥 <strong>${state.stats.participants}</strong> participants</div>
+        </div>
+        <div class="poll-actions">${UI.controlButtons(live)}</div>
+        <hr class="divider" />
+        ${live.pollType === 'bid' ? '' : `<div class="row-between" style="flex-wrap:wrap;gap:10px">
+          <div class="mute-sm">Results visibility</div>
+          <div class="segmented" style="max-width:330px;flex:1 1 240px">
+            <button data-id="${live.id}" data-visibility="never" class="${live.showResults === 'never' ? 'active' : ''}">Private</button>
+            <button data-id="${live.id}" data-visibility="during" class="${live.showResults === 'during' ? 'active' : ''}">Live</button>
+            <button data-id="${live.id}" data-visibility="after" class="${live.showResults === 'after' ? 'active' : ''}">After close</button>
+          </div>
+        </div>`}
+        ${live.pollType === 'bid' ? bidPricePanel(live) : ''}
+        <div class="row" style="gap:8px;margin-top:14px;flex-wrap:wrap">
+          <span class="mute-sm">Restart countdown:</span>
+          ${[10, 15, 20, 30, 45, 60, 90, 120]
+            .map((s) => `<button class="btn btn-ghost btn-sm" data-timer="${s}" data-id="${live.id}" title="Restart the countdown with ${s}s">↻ ${s < 60 ? s + 's' : s / 60 + 'm'}</button>`)
+            .join('')}
+          <button class="btn btn-ghost btn-sm" data-extend="10" data-id="${live.id}" title="Add 10 seconds">+10s</button>
+          <button class="btn btn-ghost btn-sm" data-extend="30" data-id="${live.id}" title="Add 30 seconds">+30s</button>
+          <button class="btn btn-ghost btn-sm" data-timer="0" data-id="${live.id}" title="Remove the countdown">No limit</button>
+        </div>
+      </div>`;
 
-router.get('/polls', async (req, res, next) => {
-  try {
-    res.json((await state.buildAdminState()).polls);
-  } catch (err) {
-    next(err);
+    UI.bindActions(els.live, { onEdit: openEditor });
+    if (live.pollType === 'bid') wireBidPricePanel(live);
+    els.live.querySelectorAll('[data-timer]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const seconds = Number(btn.dataset.timer);
+        try {
+          await API.post(`/api/admin/polls/${btn.dataset.id}/timer`, { seconds, mode: 'set' });
+          toast(seconds ? `Countdown restarted at ${seconds}s` : 'Countdown removed', 'ok');
+          window.AdminShell.poke();
+        } catch (err) {
+          toast(err.message, 'err');
+        }
+      });
+    });
+    els.live.querySelectorAll('[data-extend]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const seconds = Number(btn.dataset.extend);
+        try {
+          await API.post(`/api/admin/polls/${btn.dataset.id}/timer`, { seconds, mode: 'extend' });
+          toast(`Added ${seconds}s`, 'ok');
+          window.AdminShell.poke();
+        } catch (err) {
+          toast(err.message, 'err');
+        }
+      });
+    });
+    tickTimer();
   }
-});
 
-router.post('/polls', async (req, res, next) => {
-  try {
-    const data = parsePollPayload(req.body);
-    if (data.errors.length) return res.status(400).json({ error: data.errors.join('. ') });
-    const now = Date.now();
-    const poll = await one(
-      `INSERT INTO polls (question, description, category, status, show_results, anonymous,
-                          timer_seconds, remaining_ms, poll_type, player_name,
-                          created_at, updated_at, created_by)
-       VALUES ($1, $2, $3, 'draft', $4, $5, $6, $7, $8, $9, $10, $10, $11) RETURNING *`,
-      [
-        data.question,
-        data.description,
-        data.category,
-        data.showResults,
-        data.anonymous,
-        data.timerSeconds,
-        data.timerSeconds * 1000,
-        data.pollType,
-        data.playerName,
-        now,
-        req.admin.username
-      ]
+  function tickTimer() {
+    const textEl = document.getElementById('admin-timer-text');
+    const ringEl = document.getElementById('admin-ring');
+    const timerEl = document.getElementById('admin-timer');
+    if (!textEl || !ringEl) return;
+    const state = window.AdminShell.state;
+    const live = state?.polls.find((p) => p.status === 'active') || state?.polls.find((p) => p.status === 'paused');
+    if (!live) return;
+    if (live.status === 'paused') {
+      textEl.textContent = 'Paused';
+      timerEl.classList.add('is-urgent');
+      return;
+    }
+    if (!live.endsAt) {
+      textEl.textContent = 'No limit';
+      ringEl.style.setProperty('--pct', 100);
+      return;
+    }
+    const remaining = Math.max(0, live.endsAt - (Date.now() + tickOffset));
+    textEl.textContent = window.App.formatClock(remaining);
+    const total = Math.max(1, live.endsAt - (live.startedAt || live.endsAt - live.timerSeconds * 1000));
+    ringEl.style.setProperty('--pct', ((remaining / total) * 100).toFixed(1));
+    timerEl.classList.toggle('is-urgent', remaining <= 10_000);
+  }
+  setInterval(tickTimer, 300);
+
+  function renderResults(state) {
+    // Prefer the live poll, then a paused one, then the most recently closed
+    const live = state.polls.find((p) => p.status === 'active') || state.polls.find((p) => p.status === 'paused') || state.polls.find((p) => p.status === 'closed');
+    if (!live) {
+      els.results.innerHTML = `<div class="card"><div class="card-head"><div><div class="eyebrow">Results</div><div class="card-title" style="margin-top:4px">Nothing to show</div></div></div><div class="empty">Start a poll to see live results.</div></div>`;
+      return;
+    }
+    els.results.innerHTML = `
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="eyebrow">${live.status === 'closed' ? 'Final result' : 'Live result'}</div>
+            <div class="card-title" style="margin-top:4px">${escapeHtml(live.question)}</div>
+          </div>
+          <span class="pill pill-ghost">${live.totalVotes} votes</span>
+        </div>
+        <div class="results">${UI.resultsHtml(live.results, { max: 10 })}</div>
+        <div class="row" style="gap:8px;margin-top:14px;flex-wrap:wrap">
+          <a class="btn btn-ghost btn-sm" href="/admin-history">Full report</a>
+          <button class="btn btn-ghost btn-sm" data-id="${live.id}" data-poll-act="export">⬇ Export CSV</button>
+          <span class="mute-sm" style="margin-left:auto">Updated live</span>
+        </div>
+      </div>`;
+    UI.bindActions(els.results);
+  }
+
+  function renderQueue(state) {
+    const drafts = state.polls.filter((p) => p.status === 'draft').slice(0, 4);
+    const recent = state.polls.filter((p) => p.status === 'closed').slice(0, 3);
+    els.queue.innerHTML = `
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="eyebrow">Queue</div>
+            <div class="card-title" style="margin-top:4px">Ready to run (${state.polls.filter((p) => p.status === 'draft').length})</div>
+          </div>
+          <a class="btn btn-ghost btn-sm" href="/admin-polls">Manage</a>
+        </div>
+        ${drafts.length
+          ? drafts
+              .map(
+                (p) => `
+          <div class="poll-item">
+            <div class="poll-item-q" style="font-size:14.5px;margin-bottom:8px">${escapeHtml(p.question)}</div>
+            <div class="poll-item-meta">${UI.metaChips(p)}</div>
+            <div class="poll-actions">
+              <button class="btn btn-primary" data-start="${p.id}">▶ Start</button>
+              <a class="btn btn-ghost" href="/admin-polls?edit=${p.id}">✏️ Edit</a>
+            </div>
+          </div>`
+              )
+              .join('')
+          : '<div class="empty">No draft polls. Create one to get ready.</div>'}
+        <hr class="divider" />
+        <div class="mute-sm" style="margin-bottom:8px">Recently closed</div>
+        ${recent.length
+          ? recent
+              .map(
+                (p) => `<div class="row-between" style="padding:7px 0;font-size:13px">
+                  <span class="truncate" style="color:var(--text-dim)">${escapeHtml(p.question)}</span>
+                  <span class="pill pill-ghost">${p.totalVotes}</span>
+                </div>`
+              )
+              .join('')
+          : '<div class="mute-sm">No closed polls yet.</div>'}
+      </div>`;
+    els.queue.querySelectorAll('[data-start]').forEach((btn) =>
+      btn.addEventListener('click', () => UI.handleAction('start', btn.dataset.start))
     );
-    if (data.pollType !== 'bid') await replaceOptions(poll.id, data.options);
-    await logActivity('poll.created', `Created poll "${data.question}"`, req.admin.username);
-    const full = await state.getPoll(poll.id);
-    res.status(201).json({ ok: true, poll: await state.serializePoll(full) });
-  } catch (err) {
-    next(err);
   }
-});
 
-router.put('/polls/:id', async (req, res, next) => {
-  try {
-    const poll = await one('SELECT * FROM polls WHERE id = $1', [Number(req.params.id)]);
-    if (!poll) return res.status(404).json({ error: 'Poll not found' });
+  function renderQuick(state) {
+    els.quick.innerHTML = `
+      <div class="card" id="rapid-card" style="margin-bottom:16px">
+        <div class="card-head">
+          <div>
+            <div class="eyebrow">⚡ Rapid round</div>
+            <div class="card-title" style="margin-top:4px">Guess the next player</div>
+          </div>
+          <span class="pill pill-live">10–15 SEC</span>
+        </div>
+        <p class="mute-sm" style="margin:0 0 12px">
+          Fires a round instantly: everyone guesses, voting locks at 0&nbsp;s and the answer appears on every
+          screen by itself. Reuse it for every player in the auction.
+        </p>
+        <label class="field" style="display:block;margin-bottom:10px">
+          <span class="mute-sm">Question</span>
+          <input class="input" id="rr-question" maxlength="200" value="${escapeHtml(
+            localStorage.getItem('rr_question') || 'Who will win the bidding for the next player?'
+          )}" style="margin-top:6px" />
+        </label>
+        <label class="field" style="display:block;margin-bottom:10px">
+          <span class="mute-sm">Options — one player per line</span>
+          <textarea class="input" id="rr-options" rows="4" placeholder="Rohit&#10;Virat&#10;Hardik&#10;Jasprit" style="margin-top:6px;resize:vertical;font-family:inherit">${escapeHtml(
+            localStorage.getItem('rr_options') || ''
+          )}</textarea>
+        </label>
+        <div class="row-between" style="flex-wrap:wrap;gap:10px;margin-bottom:12px">
+          <span class="mute-sm">Countdown</span>
+          <div class="segmented" id="rr-seconds" style="max-width:320px;flex:1 1 220px">
+            ${[10, 15, 20, 30, 45, 60]
+              .map(
+                (sec) =>
+                  `<button type="button" data-sec="${sec}" class="${
+                    Number(localStorage.getItem('rr_seconds')) === sec ||
+                    (!localStorage.getItem('rr_seconds') && sec === 15)
+                      ? 'active'
+                      : ''
+                  }">${sec}s</button>`
+              )
+              .join('')}
+          </div>
+        </div>
+        <button class="btn btn-gold" id="rr-start" style="width:100%">⚡ Create &amp; start round</button>
+      </div>
 
-    const data = parsePollPayload(req.body);
-    if (data.errors.length) return res.status(400).json({ error: data.errors.join('. ') });
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="eyebrow">Quick actions</div>
+            <div class="card-title" style="margin-top:4px">Run the room</div>
+          </div>
+        </div>
+        <div class="grid-3">
+          <a class="btn btn-primary" href="/admin-polls">+ Create poll</a>
+          <a class="btn btn-ghost" href="/display" target="_blank" rel="noopener">🖥 Big screen</a>
+          <button class="btn btn-ghost" id="show-qr">🔗 Join link</button>
+          <a class="btn btn-ghost" href="/admin-participants">👥 Participants</a>
+          <button class="btn btn-ghost" id="event-settings">⚙️ Event settings</button>
+          <button class="btn btn-ghost" id="change-password">🔑 Password</button>
+          <button class="btn btn-ghost" id="session-check">🩺 Session check</button>
+        </div>
+      </div>`;
+    document.getElementById('show-qr').addEventListener('click', showShareModal);
+    document.getElementById('event-settings').addEventListener('click', showSettingsModal);
+    document.getElementById('change-password').addEventListener('click', showPasswordModal);
+    document.getElementById('session-check').addEventListener('click', showSessionCheck);
+    wireRapidRound();
+  }
 
-    const voteCount = Number(
-      (await one('SELECT COUNT(*)::int AS c FROM votes WHERE poll_id = $1', [poll.id])).c
-    );
-    if (poll.poll_type === 'bid' && data.pollType !== 'bid' && voteCount > 0) {
-      return res.status(409).json({
-        error: 'This bid round already has guesses, so it cannot become a choice poll. Reset it first.'
+  /* 🎯 Bid round: enter the price the player actually sold for → 3 winners are computed. */
+  function bidPricePanel(poll) {
+    const ladder = (metaLadder() || []).length ? metaLadder() : [];
+    const hasPrice = poll.actualLakh != null;
+    const startIndex = hasPrice
+      ? Math.max(0, ladder.findIndex((x) => x.lakh === poll.actualLakh))
+      : Math.max(0, ladder.findIndex((x) => x.lakh === 1000));
+
+    return `
+      <div class="bid-admin ${hasPrice ? 'is-set' : ''}" style="margin-top:16px">
+        <div class="row-between" style="flex-wrap:wrap;gap:8px">
+          <div class="eyebrow" style="margin:0">💰 Enter the sold price</div>
+          ${
+            hasPrice
+              ? `<span class="pill pill-gold">SOLD ${escapeHtml(poll.actualLabel || '')}</span>`
+              : '<span class="pill pill-ghost">not entered yet</span>'
+          }
+        </div>
+        <p class="mute-sm" style="margin:8px 0 12px">
+          Slide to the final hammer price. Entering it closes the round and instantly declares the
+          three closest guesses on every phone and on the projector.
+        </p>
+        <div class="bid-admin-value" id="adm-bid-value">${escapeHtml(
+          ladder[startIndex] ? ladder[startIndex].label : '—'
+        )}</div>
+        <div class="row" style="gap:10px;align-items:center;margin-top:8px">
+          <button class="btn btn-ghost btn-sm" id="adm-bid-minus" aria-label="Lower">−</button>
+          <input class="bid-range" id="adm-bid-range" type="range" min="0" max="${ladder.length - 1}"
+                 step="1" value="${startIndex}" style="flex:1" aria-label="Sold price" />
+          <button class="btn btn-ghost btn-sm" id="adm-bid-plus" aria-label="Raise">+</button>
+        </div>
+        <div class="bid-chips" id="adm-bid-chips" style="justify-content:flex-start;margin-top:12px">
+          ${[20, 100, 500, 1000, 2000, 3000]
+            .map((lakh) => {
+              const idx = ladder.findIndex((x) => x.lakh === lakh);
+              return idx < 0 ? '' : `<button type="button" class="bid-chip" data-index="${idx}">${escapeHtml(ladder[idx].label)}</button>`;
+            })
+            .join('')}
+        </div>
+        <div class="row" style="gap:8px;margin-top:14px;flex-wrap:wrap">
+          <button class="btn btn-gold" id="adm-bid-save">${hasPrice ? 'Update price & re-rank' : 'Declare winners'}</button>
+          ${hasPrice ? '<button class="btn btn-ghost btn-sm" id="adm-bid-clear">Clear price</button>' : ''}
+        </div>
+      </div>`;
+  }
+
+  function metaLadder() {
+    return (window.__bidLadder || []).map((x) => ({ lakh: x.lakh, label: x.label }));
+  }
+
+  function wireBidPricePanel(poll) {
+    const ladder = metaLadder();
+    if (!ladder.length) {
+      // fetch once, then re-render
+      API.get('/api/meta')
+        .then((m) => {
+          window.__bidLadder = m.bid.ladder;
+          window.AdminShell.refresh();
+        })
+        .catch(() => toast('Could not load the price ladder', 'err'));
+      return;
+    }
+
+    const range = document.getElementById('adm-bid-range');
+    const valueEl = document.getElementById('adm-bid-value');
+    const chips = document.getElementById('adm-bid-chips');
+    const saveBtn = document.getElementById('adm-bid-save');
+    let index = Number(range.value);
+
+    const paint = () => {
+      valueEl.textContent = ladder[index] ? ladder[index].label : '—';
+      chips.querySelectorAll('.bid-chip').forEach((c) => {
+        c.classList.toggle('active', Number(c.dataset.index) === index);
+      });
+    };
+
+    range.addEventListener('input', () => {
+      index = Number(range.value);
+      paint();
+    });
+    document.getElementById('adm-bid-minus').addEventListener('click', () => {
+      index = Math.max(0, index - 1);
+      range.value = String(index);
+      paint();
+    });
+    document.getElementById('adm-bid-plus').addEventListener('click', () => {
+      index = Math.min(ladder.length - 1, index + 1);
+      range.value = String(index);
+      paint();
+    });
+    chips.addEventListener('click', (e) => {
+      const chip = e.target.closest('.bid-chip');
+      if (!chip) return;
+      index = Number(chip.dataset.index);
+      range.value = String(index);
+      paint();
+    });
+
+    saveBtn.addEventListener('click', async () => {
+      const step = ladder[index];
+      if (!step) return;
+      const ok = await window.App.confirmDialog({
+        title: `Sold for ${step.label}?`,
+        message: `This closes the round and declares the three closest guesses for ${poll.playerName || 'this player'}. You can correct the price later.`,
+        confirmText: 'Declare winners'
+      });
+      if (!ok) return;
+      setBusy(saveBtn, true, 'Declaring…');
+      try {
+        const res = await API.post(`/api/admin/polls/${poll.id}/actual`, { lakh: step.lakh });
+        haptic(30);
+        window.App.confetti(1600);
+        toast(
+          res.winners.length
+            ? `Winners: ${res.winners.map((w) => w.name).join(', ')}`
+            : 'Price saved — nobody guessed',
+          'ok'
+        );
+        window.AdminShell.refresh();
+      } catch (err) {
+        toast(err.message, 'err');
+      } finally {
+        setBusy(saveBtn, false);
+      }
+    });
+
+    const clearBtn = document.getElementById('adm-bid-clear');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', async () => {
+        const ok = await window.App.confirmDialog({
+          title: 'Clear the sold price?',
+          message: 'Participants will stop seeing the winners until you enter a price again.',
+          confirmText: 'Clear',
+          danger: true
+        });
+        if (!ok) return;
+        try {
+          await API.del(`/api/admin/polls/${poll.id}/actual`);
+          toast('Price cleared', 'ok');
+          window.AdminShell.refresh();
+        } catch (err) {
+          toast(err.message, 'err');
+        }
       });
     }
 
-    if (data.pollType !== 'bid') {
-      if (voteCount > 0 && poll.poll_type !== 'bid') {
-        const current = await state.getOptions(poll.id);
-        const sameOptions =
-          current.length === data.options.length &&
-          current.every((o, i) => o.label.trim() === data.options[i].label);
-        if (!sameOptions) {
-          return res.status(409).json({
-            error:
-              'This poll already has votes, so its answer options cannot be changed. Reset the poll first.'
-          });
-        }
-      } else if (voteCount === 0) {
-        await syncOptions(poll.id, data.options);
-      }
+    paint();
+  }
+
+  /* ⚡ One-tap round: create the poll, then start it with a seconds countdown. */
+  function wireRapidRound() {
+    const questionEl = document.getElementById('rr-question');
+    const optionsEl = document.getElementById('rr-options');
+    const secondsEl = document.getElementById('rr-seconds');
+    const startBtn = document.getElementById('rr-start');
+    if (!questionEl || !startBtn) return;
+
+    if (!optionsEl.value.trim()) {
+      optionsEl.value = ['Rohit', 'Virat', 'Hardik', 'Jasprit', 'Rishabh'].join('\n');
     }
 
-    await q(
-      `UPDATE polls SET question = $1, description = $2, category = $3, show_results = $4,
-                        anonymous = $5, timer_seconds = $6, poll_type = $9, player_name = $10,
-                        updated_at = $7, revision = revision + 1
-        WHERE id = $8`,
-      [
-        data.question,
-        data.description,
-        data.category,
-        data.showResults,
-        data.anonymous,
-        data.timerSeconds,
-        Date.now(),
-        poll.id,
-        data.pollType,
-        data.playerName
-      ]
-    );
-    await logActivity('poll.updated', `Updated poll #${poll.id}`, req.admin.username);
-    const full = await state.getPoll(poll.id);
-    res.json({ ok: true, poll: await state.serializePoll(full) });
-  } catch (err) {
-    next(err);
-  }
-});
+    let seconds = Number(localStorage.getItem('rr_seconds')) || 15;
 
-/* Clear a wrongly entered hammer price (round stays as it is otherwise). */
-router.delete('/polls/:id/actual', async (req, res, next) => {
-  try {
-    const poll = await one('SELECT * FROM polls WHERE id = $1', [Number(req.params.id)]);
-    if (!poll) return res.status(404).json({ error: 'Poll not found' });
-    await q(
-      `UPDATE polls SET actual_lakh = NULL, actual_set_at = NULL, actual_set_by = NULL,
-                        updated_at = $1, revision = revision + 1 WHERE id = $2`,
-      [Date.now(), poll.id]
-    );
-    await logActivity('poll.actual_price_cleared', `Cleared hammer price on #${poll.id}`, req.admin.username);
-    res.json({ ok: true });
-  } catch (err) {
-    next(err);
-  }
-});
-
-router.delete('/polls/:id', async (req, res, next) => {
-  try {
-    const poll = await one('SELECT * FROM polls WHERE id = $1', [Number(req.params.id)]);
-    if (!poll) return res.status(404).json({ error: 'Poll not found' });
-    await q('DELETE FROM polls WHERE id = $1', [poll.id]);
-    await logActivity('poll.deleted', `Deleted poll #${poll.id} "${poll.question}"`, req.admin.username);
-    res.json({ ok: true });
-  } catch (err) {
-    next(err);
-  }
-});
-
-router.post('/polls/:id/duplicate', async (req, res, next) => {
-  try {
-    const poll = await one('SELECT * FROM polls WHERE id = $1', [Number(req.params.id)]);
-    if (!poll) return res.status(404).json({ error: 'Poll not found' });
-    const now = Date.now();
-    const copy = await one(
-      `INSERT INTO polls (question, description, category, status, show_results, anonymous,
-                          timer_seconds, remaining_ms, created_at, updated_at, created_by)
-       VALUES ($1, $2, $3, 'draft', $4, $5, $6, $7, $8, $8, $9) RETURNING id`,
-      [
-        `${poll.question} (copy)`,
-        poll.description,
-        poll.category,
-        poll.show_results,
-        poll.anonymous,
-        poll.timer_seconds,
-        Number(poll.timer_seconds) * 1000,
-        now,
-        req.admin.username
-      ]
-    );
-    const options = await state.getOptions(poll.id);
-    await replaceOptions(
-      copy.id,
-      options.map((o) => ({ label: o.label, emoji: o.emoji }))
-    );
-    await logActivity('poll.duplicated', `Duplicated poll #${poll.id}`, req.admin.username);
-    res.status(201).json({ ok: true, id: copy.id });
-  } catch (err) {
-    next(err);
-  }
-});
-
-/* ------------------------------ poll lifecycle --------------------------- */
-
-router.post('/polls/:id/action', async (req, res, next) => {
-  try {
-    const poll = await one('SELECT * FROM polls WHERE id = $1', [Number(req.params.id)]);
-    if (!poll) return res.status(404).json({ error: 'Poll not found' });
-    const action = String(req.body?.action || '');
-    const now = Date.now();
-    const timerMs = Math.max(0, Number(req.body?.timerSeconds ?? poll.timer_seconds) || 0) * 1000;
-
-    switch (action) {
-      case 'start':
-      case 'reopen': {
-        // Pause every other live poll so all devices show one poll
-        await q(
-          `UPDATE polls
-              SET status = 'paused',
-                  remaining_ms = CASE WHEN status = 'active' AND ends_at IS NOT NULL
-                                      THEN GREATEST(0, ends_at - $1) ELSE remaining_ms END,
-                  ends_at = NULL, updated_at = $1, revision = revision + 1
-            WHERE status IN ('active','paused') AND id <> $2`,
-          [now, poll.id]
-        );
-        const endsAt = timerMs > 0 ? now + timerMs : null;
-        const timerSecondsOverride =
-          req.body?.timerSeconds === undefined ? null : Math.round(timerMs / 1000);
-        await q(
-          `UPDATE polls SET status = 'active', started_at = $1, ends_at = $2, closed_at = NULL,
-                            remaining_ms = $3, updated_at = $1, revision = revision + 1,
-                            timer_seconds = COALESCE($4, timer_seconds)
-            WHERE id = $5`,
-          [now, endsAt, timerMs, timerSecondsOverride, poll.id]
-        );
-        await logActivity(
-          action === 'reopen' ? 'poll.reopened' : 'poll.started',
-          `Poll #${poll.id} "${poll.question}" is live`,
-          req.admin.username
-        );
-        break;
-      }
-      case 'pause': {
-        if (poll.status !== 'active') {
-          return res.status(409).json({ error: 'Only a live poll can be paused' });
-        }
-        const remaining = poll.ends_at ? Math.max(0, Number(poll.ends_at) - now) : Number(poll.remaining_ms || 0);
-        await q(
-          `UPDATE polls SET status = 'paused', ends_at = NULL, remaining_ms = $1,
-                            updated_at = $2, revision = revision + 1 WHERE id = $3`,
-          [remaining, now, poll.id]
-        );
-        await logActivity('poll.paused', `Poll #${poll.id} paused`, req.admin.username);
-        break;
-      }
-      case 'resume': {
-        if (poll.status !== 'paused') {
-          return res.status(409).json({ error: 'Only a paused poll can be resumed' });
-        }
-        const remaining = Number(poll.remaining_ms) > 0 ? Number(poll.remaining_ms) : timerMs;
-        const endsAt = remaining > 0 ? now + remaining : null;
-        await q(
-          `UPDATE polls SET status = 'active', started_at = COALESCE(started_at, $1), ends_at = $2,
-                            remaining_ms = $3, updated_at = $1, revision = revision + 1 WHERE id = $4`,
-          [now, endsAt, remaining, poll.id]
-        );
-        await logActivity('poll.resumed', `Poll #${poll.id} resumed`, req.admin.username);
-        break;
-      }
-      case 'close': {
-        if (!['active', 'paused'].includes(poll.status)) {
-          return res.status(409).json({ error: 'Only a live or paused poll can be closed' });
-        }
-        await q(
-          `UPDATE polls SET status = 'closed', closed_at = $1, remaining_ms = 0,
-                            updated_at = $1, revision = revision + 1 WHERE id = $2`,
-          [now, poll.id]
-        );
-        await logActivity('poll.closed', `Poll #${poll.id} closed`, req.admin.username);
-        break;
-      }
-      case 'reset': {
-        if (req.body?.confirm !== true) {
-          return res.status(400).json({ error: 'Reset needs explicit confirmation' });
-        }
-        await q('DELETE FROM votes WHERE poll_id = $1', [poll.id]);
-        await q(
-          `UPDATE polls SET status = 'draft', started_at = NULL, ends_at = NULL, closed_at = NULL,
-                            remaining_ms = timer_seconds * 1000, updated_at = $1,
-                            revision = revision + 1 WHERE id = $2`,
-          [now, poll.id]
-        );
-        await logActivity('poll.reset', `Poll #${poll.id} reset (all votes cleared)`, req.admin.username);
-        break;
-      }
-      case 'extend': {
-        const extra = Math.max(0, Number(req.body?.seconds || 0)) * 1000;
-        if (poll.status !== 'active') {
-          return res.status(409).json({ error: 'Only a live poll can be extended' });
-        }
-        const base = poll.ends_at ? Math.max(now, Number(poll.ends_at)) : now;
-        await q(
-          `UPDATE polls SET ends_at = $1, started_at = COALESCE(started_at, $2),
-                            updated_at = $2, revision = revision + 1 WHERE id = $3`,
-          [base + extra, now, poll.id]
-        );
-        await logActivity(
-          'poll.extended',
-          `Poll #${poll.id} timer +${Math.round(extra / 1000)}s`,
-          req.admin.username
-        );
-        break;
-      }
-      case 'visibility': {
-        const mode = ['never', 'during', 'after'].includes(req.body?.showResults)
-          ? req.body.showResults
-          : 'after';
-        await q(
-          'UPDATE polls SET show_results = $1, updated_at = $2, revision = revision + 1 WHERE id = $3',
-          [mode, now, poll.id]
-        );
-        await logActivity(
-          'poll.visibility',
-          `Poll #${poll.id} results visibility = ${mode}`,
-          req.admin.username
-        );
-        break;
-      }
-      default:
-        return res.status(400).json({ error: 'Unknown action' });
-    }
-
-    const full = await state.getPoll(poll.id);
-    res.json({ ok: true, poll: await state.serializePoll(full) });
-  } catch (err) {
-    next(err);
-  }
-});
-
-/**
- * Timer control.
- *   { seconds: 15, mode: 'set' }    → countdown restarts from now with 15s
- *   { seconds: 30, mode: 'extend' } → adds 30s to the current countdown
- * Works on draft (just stores the length) and active polls (applies immediately).
- */
-router.post('/polls/:id/timer', async (req, res, next) => {
-  try {
-    const poll = await one('SELECT * FROM polls WHERE id = $1', [Number(req.params.id)]);
-    if (!poll) return res.status(404).json({ error: 'Poll not found' });
-
-    const seconds = Math.max(0, Math.min(3600, Math.round(Number(req.body?.seconds) || 0)));
-    const mode = req.body?.mode === 'extend' ? 'extend' : 'set';
-    const now = Date.now();
-
-    if (mode === 'extend' && poll.status === 'active') {
-      const base = poll.ends_at ? Math.max(now, Number(poll.ends_at)) : now;
-      await q(
-        'UPDATE polls SET ends_at = $1, updated_at = $2, revision = revision + 1 WHERE id = $3',
-        [base + seconds * 1000, now, poll.id]
-      );
-      await logActivity('poll.timer', `Poll #${poll.id} +${seconds}s`, req.admin.username);
-      return res.json({ ok: true, mode, seconds, poll: await state.serializePoll(await state.getPoll(poll.id)) });
-    }
-
-    const endsAt = poll.status === 'active' && seconds > 0 ? now + seconds * 1000 : null;
-    await q(
-      `UPDATE polls SET timer_seconds = $1, remaining_ms = $2, ends_at = $3,
-                        updated_at = $4, revision = revision + 1 WHERE id = $5`,
-      [seconds, seconds * 1000, endsAt, now, poll.id]
-    );
-    await logActivity(
-      'poll.timer',
-      `Poll #${poll.id} timer set to ${seconds ? seconds + 's' : 'no limit'}`,
-      req.admin.username
-    );
-    res.json({
-      ok: true,
-      mode: 'set',
-      seconds,
-      poll: await state.serializePoll(await state.getPoll(poll.id))
+    secondsEl.querySelectorAll('button').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        seconds = Number(btn.dataset.sec);
+        localStorage.setItem('rr_seconds', String(seconds));
+        secondsEl.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b === btn));
+      });
     });
-  } catch (err) {
-    next(err);
-  }
-});
 
-/* --------------------------------- votes --------------------------------- */
+    startBtn.addEventListener('click', async () => {
+      const question = questionEl.value.trim();
+      const options = optionsEl.value
+        .split(/\n|,/)
+        .map((t) => t.trim())
+        .filter(Boolean)
+        .slice(0, 10);
+      if (question.length < 5) return toast('Write a question first', 'err');
+      if (options.length < 2) return toast('Add at least 2 options', 'err');
 
-/* --------------------- bid round: enter the hammer price -------------------- */
+      localStorage.setItem('rr_question', question);
+      localStorage.setItem('rr_options', options.join('\n'));
 
-/**
- * The host types what the player ACTUALLY sold for. That single number is the result:
- * it closes the round (if still open) and rankBidGuesses() names the 3 closest guesses.
- * Can be called again to correct a typo — everything is recomputed on read.
- */
-router.post('/polls/:id/actual', async (req, res, next) => {
-  try {
-    const poll = await one('SELECT * FROM polls WHERE id = $1', [Number(req.params.id)]);
-    if (!poll) return res.status(404).json({ error: 'Poll not found' });
-    if (poll.poll_type !== 'bid') {
-      return res.status(400).json({ error: 'This poll is not a bid range poll' });
-    }
-
-    // The sold price is whatever the auction ended at — 1.10 Cr is a real result and is NOT on
-    // the guess ladder, so accept any whole-lakh value (the ladder only constrains guesses).
-    const raw = Number(req.body?.lakh);
-    if (!Number.isFinite(raw) || raw <= 0) {
-      return res.status(400).json({ error: 'Enter the price the player actually sold for' });
-    }
-    const lakhValue = Math.round(raw);
-    if (lakhValue > 10000) {
-      return res.status(400).json({ error: 'That price looks too high (max 100 Cr)' });
-    }
-
-    const now = Date.now();
-    await q(
-      `UPDATE polls
-          SET actual_lakh = $1, actual_set_at = $2, actual_set_by = $3,
-              status = CASE WHEN status IN ('active','paused') THEN 'closed' ELSE status END,
-              closed_at = CASE WHEN status IN ('active','paused') THEN $2 ELSE closed_at END,
-              ends_at = CASE WHEN status IN ('active','paused') THEN NULL ELSE ends_at END,
-              updated_at = $2, revision = revision + 1
-        WHERE id = $4`,
-      [lakhValue, now, req.admin.username, poll.id]
-    );
-
-    await logActivity(
-      'poll.actual_price',
-      `${poll.player_name || poll.question} sold for ${ladder.label(lakhValue)}`,
-      req.admin.username
-    );
-
-    const fresh = await state.getPoll(poll.id);
-    const results = await state.getBidResults(fresh);
-    res.json({
-      ok: true,
-      actualLakh: lakhValue,
-      actualLabel: ladder.label(lakhValue),
-      winners: results.winners,
-      totalGuesses: results.totalGuesses
+      startBtn.disabled = true;
+      startBtn.textContent = 'Starting…';
+      try {
+        const created = await API.post('/api/admin/polls', {
+          question,
+          description: `Live guessing round · ${seconds}s`,
+          category: 'Rapid round',
+          showResults: 'after', // reveal automatically when the countdown ends
+          anonymous: false,
+          timerSeconds: seconds,
+          options: options.map((label) => ({ label }))
+        });
+        const id = created.poll.id;
+        await API.post(`/api/admin/polls/${id}/action`, { action: 'start', timerSeconds: seconds });
+        toast(`Round live — ${seconds}s on the clock`, 'ok');
+        window.AdminShell.refresh();
+      } catch (err) {
+        toast(err.message || 'Could not start the round', 'err');
+      } finally {
+        startBtn.disabled = false;
+        startBtn.innerHTML = '⚡ Create &amp; start round';
+      }
     });
-  } catch (err) {
-    next(err);
   }
-});
 
-router.get('/polls/:id/votes', async (req, res, next) => {
-  try {
-    const poll = await one('SELECT * FROM polls WHERE id = $1', [Number(req.params.id)]);
-    if (!poll) return res.status(404).json({ error: 'Poll not found' });
-    const rows = await q(
-      `SELECT v.id, v.created_at, v.option_id, o.label AS option_label, p.name, p.employee_id
-         FROM votes v
-         JOIN options o ON o.id = v.option_id
-         LEFT JOIN participants p ON p.id = v.participant_id
-        WHERE v.poll_id = $1
-        ORDER BY v.created_at DESC`,
-      [poll.id]
+  function renderActivity(state) {
+    if (!state.recentActivity.length) {
+      els.activity.innerHTML = '<div class="empty">No activity yet.</div>';
+      return;
+    }
+    els.activity.innerHTML = state.recentActivity
+      .map(
+        (a) => `
+      <div class="act-item">
+        <div class="act-dot"></div>
+        <div class="grow">
+          <div style="color:var(--text)">${escapeHtml(a.detail || a.action)}</div>
+          <div class="mute-sm">${escapeHtml(a.action)} · ${escapeHtml(a.actor || 'system')}</div>
+        </div>
+        <div class="act-time">${timeAgo(a.created_at)}</div>
+      </div>`
+      )
+      .join('');
+  }
+
+  /* 🩺 Session / deployment diagnostics: tells you exactly why the panel logs you out. */
+  async function showSessionCheck() {
+    const { backdrop, close } = buildModal(
+      `<div class="card-title">Session &amp; deployment check</div>
+       <p class="mute-sm" style="margin:10px 0 14px">Read live from this deployment. Useful when the panel
+       keeps bouncing you to the login page.</p>
+       <div id="diag-body"><div class="mute-sm">Checking…</div></div>`,
+      { wide: true }
     );
-    const anonymous = Number(poll.anonymous) === 1;
-    res.json({
-      anonymous,
-      votes: rows.map((r) => ({
-        id: r.id,
-        optionLabel: r.option_label,
-        createdAt: Number(r.created_at),
-        participant: anonymous ? 'Anonymous' : r.name || 'Unknown',
-        employeeId: anonymous ? '—' : r.employee_id || '—'
-      }))
+
+    let diag;
+    try {
+      diag = await API.get('/api/diag');
+    } catch (err) {
+      document.getElementById('diag-body').innerHTML =
+        `<div class="banner banner-warn">Could not reach /api/diag: ${escapeHtml(err.message)}</div>`;
+      return;
+    }
+
+    const row = (label, value, good) => `
+      <div class="row-between" style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,.07)">
+        <span class="mute-sm">${label}</span>
+        <strong style="color:${good === undefined ? 'var(--text)' : good ? 'var(--green-400, #35d07f)' : '#ff7b8a'}">
+          ${escapeHtml(String(value))}
+        </strong>
+      </div>`;
+
+    const r = diag.request || {};
+    const db = diag.database || {};
+    const cfg = diag.config || {};
+    const dep = diag.deployment || {};
+
+    document.getElementById('diag-body').innerHTML = `
+      <div class="eyebrow" style="margin-bottom:6px">Session</div>
+      ${row('Admin cookie present in this browser', r.hasAdminCookie ? 'yes' : 'NO', !!r.hasAdminCookie)}
+      ${row('Cookie found in database', r.adminCookieFoundInDatabase === undefined ? '—' : r.adminCookieFoundInDatabase ? 'yes' : 'NO', r.adminCookieFoundInDatabase)}
+      ${row('Session expires in', r.adminSessionExpiresInMs ? Math.round(r.adminSessionExpiresInMs / 60000) + ' min' : '—')}
+      <div class="eyebrow" style="margin:16px 0 6px">Database</div>
+      ${row('DATABASE_URL set', db.configured ? 'yes' : 'NO', !!db.configured)}
+      ${row('Reachable', db.reachable ? `yes (${db.latencyMs} ms)` : 'NO', !!db.reachable)}
+      ${row('Host', cfg.databaseHost || '—')}
+      ${row('Schema version', diag.schema?.schemaVersion || '—')}
+      ${row('Admin accounts / sessions', `${diag.counts?.admins ?? '—'} / ${diag.counts?.admin_sessions ?? '—'}`)}
+      ${row('Expired sessions sitting in DB', diag.counts?.expired_sessions ?? '—')}
+      <div class="eyebrow" style="margin:16px 0 6px">Deployment</div>
+      ${row('Commit', dep.commit ? dep.commit.slice(0, 7) : 'unknown (local)')}
+      ${row('Environment', dep.env || cfg.nodeEnv || 'local')}
+      ${row('Region', dep.region || '—')}
+      ${row('Secure cookie setting', cfg.cookieSecure ? 'on' : 'off')}
+      ${db.error ? `<div class="banner banner-warn" style="margin-top:12px">Database error: ${escapeHtml(db.error)}</div>` : ''}
+      ${
+        r.hasAdminCookie && r.adminCookieFoundInDatabase === false
+          ? `<div class="banner banner-warn" style="margin-top:12px">
+               The browser has an admin cookie but this deployment's database has no matching session.
+               That usually means the cookie belongs to a different database or a session reset.
+               Sign in again once — if it keeps happening, the deployment is pointing at a different database than before.
+             </div>`
+          : ''
+      }
+      ${
+        !r.hasAdminCookie
+          ? `<div class="banner banner-warn" style="margin-top:12px">
+               Your browser is not sending the admin cookie at all. If you are viewing this through a
+               link that is NOT the https address (or an embedded preview), open the deployment URL directly.
+             </div>`
+          : ''
+      }
+      <div class="row-between" style="margin-top:16px">
+        <button class="btn btn-ghost" data-close>Close</button>
+        <button class="btn btn-primary" id="diag-copy">Copy report</button>
+      </div>`;
+
+    document.getElementById('diag-copy').addEventListener('click', async () => {
+      await window.App.copyText(JSON.stringify(diag, null, 2));
+      toast('Report copied', 'ok');
     });
-  } catch (err) {
-    next(err);
+    backdrop.querySelector('[data-close]').addEventListener('click', close);
   }
-});
 
-/* ------------------------------ participants ----------------------------- */
+  /* ------------------------------- modals ------------------------------- */
 
-router.get('/participants', async (req, res, next) => {
-  try {
-    const term = String(req.query.q || '').trim();
-    const like = `%${term}%`;
-    const rows = await q(
-      `SELECT p.*,
-              (SELECT COUNT(*)::int FROM votes v WHERE v.participant_id = p.id) AS vote_count,
-              (SELECT MAX(v.created_at) FROM votes v WHERE v.participant_id = p.id) AS last_vote_at
-         FROM participants p
-        WHERE $1 = '' OR p.name ILIKE $2 OR p.employee_id ILIKE $2 OR COALESCE(p.team,'') ILIKE $2
-        ORDER BY p.created_at DESC`,
-      [term, like]
-    );
-    res.json({
-      participants: rows.map((r) => ({
-        id: r.id,
-        name: r.name,
-        employeeId: r.employee_id,
-        team: r.team,
-        blocked: Number(r.blocked) === 1,
-        voteCount: Number(r.vote_count),
-        lastVoteAt: r.last_vote_at ? Number(r.last_vote_at) : null,
-        createdAt: Number(r.created_at),
-        lastSeenAt: Number(r.last_seen_at)
-      }))
+  function buildModal(inner, { wide = false } = {}) {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop';
+    backdrop.innerHTML = `<div class="modal" style="${wide ? 'width:min(100%,680px)' : ''}">${inner}</div>`;
+    document.body.appendChild(backdrop);
+    const close = () => backdrop.remove();
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop || e.target.closest('[data-close]')) close();
     });
-  } catch (err) {
-    next(err);
+    document.addEventListener('keydown', function onKey(e) {
+      if (e.key === 'Escape') {
+        close();
+        document.removeEventListener('keydown', onKey);
+      }
+    });
+    return { backdrop, close };
   }
-});
 
-router.post('/participants', async (req, res, next) => {
-  try {
-    const name = String(req.body?.name || '').replace(/\s+/g, ' ').trim().slice(0, 40);
-    const employeeId = String(req.body?.employeeId || '').trim().slice(0, 24);
-    const team = String(req.body?.team || '').trim().slice(0, 40) || null;
-    if (name.length < 2) return res.status(400).json({ error: 'Name is too short' });
-    if (!/^[A-Za-z0-9._/-]{2,24}$/.test(employeeId)) {
-      return res.status(400).json({ error: 'Employee ID must be 2-24 letters/numbers' });
-    }
-    const exists = await one('SELECT id FROM participants WHERE LOWER(employee_id) = LOWER($1)', [
-      employeeId
-    ]);
-    if (exists) return res.status(409).json({ error: 'That employee ID already exists' });
-
-    const now = Date.now();
-    await q(
-      'INSERT INTO participants (name, employee_id, team, created_at, last_seen_at) VALUES ($1, $2, $3, $4, $4)',
-      [name, employeeId, team, now]
+  async function showShareModal() {
+    const { backdrop } = buildModal(
+      `<div class="modal-title">Share the join link</div>
+       <div class="modal-body">Everyone opens this link on their phone — no app install needed.
+         Paste it in your team chat, WhatsApp group or email.</div>
+       <div class="center" id="share-holder" style="font-family:var(--font-num);font-size:14px;color:var(--green-400);word-break:break-all;padding:14px;border-radius:14px;background:rgba(4,10,24,.7);border:1px solid var(--card-border)">Loading…</div>
+       <div class="modal-actions" style="margin-top:18px">
+         <button class="btn btn-ghost" data-close>Close</button>
+         <button class="btn btn-primary" id="copy-share">Copy link</button>
+       </div>
+       <div class="center" style="margin-top:12px">
+         <a class="btn-link" href="/display" target="_blank" rel="noopener">Open the big screen instead →</a>
+       </div>`
     );
-    await logActivity('participant.added', `Added ${name} (${employeeId})`, req.admin.username);
-    res.status(201).json({ ok: true });
-  } catch (err) {
-    next(err);
+    let joinUrl = '';
+    try {
+      const meta = await API.get('/api/meta');
+      joinUrl = meta.join.joinUrl;
+      backdrop.querySelector('#share-holder').textContent = joinUrl;
+    } catch {
+      backdrop.querySelector('#share-holder').textContent = 'Could not load the link';
+    }
+    backdrop.querySelector('#copy-share').addEventListener('click', async () => {
+      const ok = await window.App.copyText(joinUrl);
+      toast(ok ? 'Link copied' : joinUrl, ok ? 'ok' : 'info', 4000);
+    });
   }
-});
 
-router.patch('/participants/:id', async (req, res, next) => {
-  try {
-    const id = Number(req.params.id);
-    const existing = await one('SELECT * FROM participants WHERE id = $1', [id]);
-    if (!existing) return res.status(404).json({ error: 'Participant not found' });
-
-    const name = String(req.body?.name ?? existing.name).replace(/\s+/g, ' ').trim().slice(0, 40);
-    const team = String(req.body?.team ?? existing.team ?? '').trim().slice(0, 40) || null;
-    const blocked = req.body?.blocked === undefined ? existing.blocked : req.body.blocked ? 1 : 0;
-
-    await q('UPDATE participants SET name = $1, team = $2, blocked = $3 WHERE id = $4', [
-      name,
-      team,
-      blocked,
-      id
-    ]);
-    if (blocked) await q('DELETE FROM participant_sessions WHERE participant_id = $1', [id]);
-
-    await logActivity(
-      'participant.updated',
-      `${name} ${blocked ? 'blocked' : 'updated'}`,
-      req.admin.username
+  async function showSettingsModal() {
+    let settings = window.AdminShell.state?.settings || {};
+    const { backdrop } = buildModal(
+      `<div class="modal-title">Event settings</div>
+       <div class="modal-body">These appear on the join page and the big screen.</div>
+       <div class="stack">
+         <label class="field"><span class="label">Event name</span><input class="input" id="s-name" value="${escapeHtml(settings.event_name || '')}" maxlength="80" /></label>
+         <label class="field"><span class="label">Tagline</span><input class="input" id="s-tag" value="${escapeHtml(settings.event_tagline || '')}" maxlength="80" /></label>
+         <label class="field"><span class="label">Big-screen message (idle)</span><textarea class="textarea" id="s-msg" maxlength="240">${escapeHtml(settings.display_message || '')}</textarea></label>
+         <label class="switch"><input type="checkbox" id="s-code-req" ${settings.join_requires_code === '1' ? 'checked' : ''} /><span class="switch-track"></span><span class="switch-text"><span class="switch-title">Require an access code to join</span><span class="switch-sub">Only people with the event code can vote</span></span></label>
+         <label class="field"><span class="label">Access code</span><input class="input" id="s-code" value="${escapeHtml(settings.access_code || '')}" maxlength="32" /></label>
+         <label class="switch"><input type="checkbox" id="s-allow" ${settings.allow_new_participants === '1' ? 'checked' : ''} /><span class="switch-track"></span><span class="switch-text"><span class="switch-title">Allow new participants to join</span><span class="switch-sub">Turn off once everyone is in</span></span></label>
+       </div>
+       <div class="modal-actions" style="margin-top:18px">
+         <button class="btn btn-ghost" data-close>Cancel</button>
+         <button class="btn btn-primary" id="save-settings">Save settings</button>
+       </div>`,
+      { wide: true }
     );
-    res.json({ ok: true });
-  } catch (err) {
-    next(err);
-  }
-});
-
-router.delete('/participants/:id', async (req, res, next) => {
-  try {
-    const id = Number(req.params.id);
-    const existing = await one('SELECT * FROM participants WHERE id = $1', [id]);
-    if (!existing) return res.status(404).json({ error: 'Participant not found' });
-    await q('DELETE FROM participants WHERE id = $1', [id]);
-    await logActivity('participant.deleted', `Removed ${existing.name}`, req.admin.username);
-    res.json({ ok: true });
-  } catch (err) {
-    next(err);
-  }
-});
-
-router.delete('/participants/:id/votes', async (req, res, next) => {
-  try {
-    const id = Number(req.params.id);
-    const pollId = Number(req.query.pollId);
-    if (Number.isInteger(pollId) && pollId > 0) {
-      await q('DELETE FROM votes WHERE participant_id = $1 AND poll_id = $2', [id, pollId]);
-    } else {
-      await q('DELETE FROM votes WHERE participant_id = $1', [id]);
-    }
-    await logActivity('participant.votes_cleared', `Cleared votes for participant #${id}`, req.admin.username);
-    res.json({ ok: true });
-  } catch (err) {
-    next(err);
-  }
-});
-
-/* -------------------------------- settings ------------------------------- */
-
-router.get('/settings', async (req, res, next) => {
-  try {
-    res.json({ settings: await allSettings({ fresh: true }) });
-  } catch (err) {
-    next(err);
-  }
-});
-
-router.put('/settings', async (req, res, next) => {
-  try {
-    const allowed = [
-      'event_name',
-      'event_tagline',
-      'venue_line',
-      'join_requires_code',
-      'access_code',
-      'allow_new_participants',
-      'display_message'
-    ];
-    const body = req.body || {};
-    for (const key of allowed) {
-      if (body[key] === undefined) continue;
-      let value = String(body[key]).slice(0, 300);
-      if (key === 'join_requires_code' || key === 'allow_new_participants') {
-        value = body[key] === true || body[key] === '1' || body[key] === 'true' ? '1' : '0';
+    backdrop.querySelector('#save-settings').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      setBusy(btn, true, 'Saving…');
+      try {
+        await API.put('/api/admin/settings', {
+          event_name: backdrop.querySelector('#s-name').value.trim(),
+          event_tagline: backdrop.querySelector('#s-tag').value.trim(),
+          display_message: backdrop.querySelector('#s-msg').value.trim(),
+          join_requires_code: backdrop.querySelector('#s-code-req').checked,
+          access_code: backdrop.querySelector('#s-code').value.trim(),
+          allow_new_participants: backdrop.querySelector('#s-allow').checked
+        });
+        toast('Settings saved', 'ok');
+        backdrop.remove();
+        await window.AdminShell.refresh();
+      } catch (err) {
+        setBusy(btn, false);
+        toast(err.message, 'err');
       }
-      await setSetting(key, value);
-    }
-    await logActivity('settings.updated', 'Event settings updated', req.admin.username);
-    res.json({ ok: true, settings: await allSettings({ fresh: true }) });
-  } catch (err) {
-    next(err);
+    });
   }
-});
 
-/* ---------------------------------- CSV ---------------------------------- */
-
-function csvCell(value) {
-  const str = value === null || value === undefined ? '' : String(value);
-  return /[",\n\r]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
-}
-
-function csvResponse(res, filename, rows) {
-  const body = rows.map((row) => row.map(csvCell).join(',')).join('\r\n');
-  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-  res.send('\uFEFF' + body);
-}
-
-router.get('/export/poll/:id.csv', async (req, res, next) => {
-  try {
-    const poll = await one('SELECT * FROM polls WHERE id = $1', [Number(req.params.id)]);
-    if (!poll) return res.status(404).json({ error: 'Poll not found' });
-    const settings = await allSettings();
-
-    /* Bid round: export the guesses, the hammer price and the ranked winners. */
-    if (poll.poll_type === 'bid') {
-      const bidResults = await state.getBidResults(poll);
-      const guesses = await state.getBidGuesses(poll.id);
-      const ranked = poll.actual_lakh == null ? [] : state.rankBidGuesses(guesses, poll.actual_lakh);
-      const rows = [
-        ['Bid Range Round'],
-        ['Event', settings.event_name],
-        ['Player', poll.player_name || ''],
-        ['Question', poll.question],
-        ['Status', poll.status],
-        ['Sold for', bidResults.actualLabel || 'not entered yet'],
-        ['Total guesses', bidResults.totalGuesses],
-        ['Exported at', new Date().toISOString()],
-        [],
-        ['Rank', 'Winner', 'Participant', 'Employee ID', 'Guess', 'Difference', 'Direction', 'Submitted at']
-      ];
-      for (const g of ranked) {
-        rows.push([
-          g.rank,
-          g.rank <= 3 ? 'YES' : '',
-          g.name,
-          g.employeeId,
-          g.guessLabel,
-          g.diffLabel,
-          g.direction,
-          new Date(g.at).toISOString()
-        ]);
-      }
-      rows.push([], ['Guess distribution'], ['Price', 'Guesses', 'Percent']);
-      for (const d of bidResults.distribution) {
-        rows.push([d.label, d.count, `${d.percent}%`]);
-      }
-      return csvResponse(res, `bid-${poll.id}-results.csv`, rows);
-    }
-
-    const results = await state.getResults(poll.id);
-
-    const rows = [
-      ['Poll Report'],
-      ['Event', settings.event_name],
-      ['Question', poll.question],
-      ['Category', poll.category || ''],
-      ['Status', poll.status],
-      ['Anonymous', Number(poll.anonymous) ? 'Yes' : 'No'],
-      ['Results visibility', poll.show_results],
-      ['Total votes', results.totalVotes],
-      ['Exported at', new Date().toISOString()],
-      [],
-      ['Option', 'Votes', 'Percent']
-    ];
-    for (const r of results.rows) rows.push([r.label, r.votes, `${r.percent}%`]);
-
-    if (!Number(poll.anonymous)) {
-      const votes = await q(
-        `SELECT v.created_at, p.name, p.employee_id, o.label
-           FROM votes v
-           JOIN options o ON o.id = v.option_id
-           LEFT JOIN participants p ON p.id = v.participant_id
-          WHERE v.poll_id = $1
-          ORDER BY v.created_at ASC`,
-        [poll.id]
-      );
-      rows.push([], ['Vote log (chronological)'], ['Time', 'Participant', 'Employee ID', 'Option']);
-      for (const v of votes) {
-        rows.push([
-          new Date(Number(v.created_at)).toISOString(),
-          v.name || '',
-          v.employee_id || '',
-          v.label
-        ]);
-      }
-    }
-    csvResponse(res, `poll-${poll.id}-results.csv`, rows);
-  } catch (err) {
-    next(err);
-  }
-});
-
-router.get('/export/participants.csv', async (req, res, next) => {
-  try {
-    const rows = [['Name', 'Employee ID', 'Team', 'Blocked', 'Votes cast', 'Joined at']];
-    const list = await q(
-      `SELECT p.*, (SELECT COUNT(*)::int FROM votes v WHERE v.participant_id = p.id) AS vote_count
-         FROM participants p ORDER BY p.created_at ASC`
+  function showPasswordModal() {
+    const { backdrop } = buildModal(
+      `<div class="modal-title">Change admin password</div>
+       <div class="modal-body">Use at least 6 characters. You'll stay signed in on this device.</div>
+       <div class="stack">
+         <label class="field"><span class="label">Current password</span><input class="input" type="password" id="pw-current" autocomplete="current-password" /></label>
+         <label class="field"><span class="label">New password</span><input class="input" type="password" id="pw-new" autocomplete="new-password" /></label>
+         <label class="field"><span class="label">Confirm new password</span><input class="input" type="password" id="pw-confirm" autocomplete="new-password" /></label>
+       </div>
+       <div class="modal-actions" style="margin-top:18px">
+         <button class="btn btn-ghost" data-close>Cancel</button>
+         <button class="btn btn-primary" id="save-pw">Update password</button>
+       </div>`
     );
-    for (const p of list) {
-      rows.push([
-        p.name,
-        p.employee_id,
-        p.team || '',
-        Number(p.blocked) ? 'Yes' : 'No',
-        p.vote_count,
-        new Date(Number(p.created_at)).toISOString()
-      ]);
-    }
-    csvResponse(res, 'participants.csv', rows);
-  } catch (err) {
-    next(err);
-  }
-});
-
-router.get('/export/all-polls.csv', async (req, res, next) => {
-  try {
-    const settings = await allSettings();
-    const rows = [['Event', settings.event_name], [], ['Poll ID', 'Question', 'Status', 'Total votes']];
-    const polls = await q('SELECT * FROM polls ORDER BY id ASC');
-    const summaries = [];
-    for (const p of polls) {
-      const results = await state.getResults(p.id);
-      summaries.push({ poll: p, results });
-      rows.push([p.id, p.question, p.status, results.totalVotes]);
-    }
-    rows.push([], ['Poll', 'Option', 'Votes', 'Percent']);
-    for (const s of summaries) {
-      for (const r of s.results.rows) {
-        rows.push([`#${s.poll.id} ${s.poll.question}`, r.label, r.votes, `${r.percent}%`]);
+    backdrop.querySelector('#save-pw').addEventListener('click', async (e) => {
+      const current = backdrop.querySelector('#pw-current').value;
+      const next = backdrop.querySelector('#pw-new').value;
+      const confirm = backdrop.querySelector('#pw-confirm').value;
+      if (next !== confirm) return toast('New passwords do not match', 'err');
+      setBusy(e.currentTarget, true, 'Saving…');
+      try {
+        const pw = await API.post('/api/admin/password', { currentPassword: current, newPassword: next });
+        if (pw && pw.token) window.dispatchEvent(new CustomEvent('app:new-admin-token', { detail: pw }));
+        toast('Password updated', 'ok');
+        document.getElementById('password-banner')?.classList.add('hidden');
+        backdrop.remove();
+      } catch (err) {
+        setBusy(e.currentTarget, false);
+        toast(err.message, 'err');
       }
-    }
-    csvResponse(res, 'all-polls-report.csv', rows);
-  } catch (err) {
-    next(err);
+    });
   }
-});
 
-module.exports = router;
+  function openEditor(poll) {
+    window.location.href = `/admin-polls?edit=${poll.id}`;
+  }
+
+  document.getElementById('open-password')?.addEventListener('click', showPasswordModal);
+
+  window.AdminShell.ready.then(() => {
+    window.AdminShell.onChange(render);
+  });
+})();

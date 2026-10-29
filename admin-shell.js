@@ -96,10 +96,12 @@
   }
 
   function markActiveNav() {
-    const path = location.pathname.replace(/\/$/, '') || '/admin';
+    const path = (location.pathname.replace(/\/$/, '') || '/admin').toLowerCase();
     document.querySelectorAll('[data-nav]').forEach((el) => {
-      const href = el.getAttribute('href');
-      el.classList.toggle('active', href === path);
+      const href = (el.getAttribute('href') || '').toLowerCase();
+      // /admin-polls, /admin/polls and /admin-polls.html all mean the same page
+      const norm = (v) => v.replace(/^\/admin\//, '/admin-').replace(/\.html$/, '');
+      el.classList.toggle('active', norm(href) === norm(path));
     });
   }
 
