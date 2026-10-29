@@ -85,6 +85,7 @@
   async function paintBuild() {
     try {
       const h = await API.get('/api/health');
+      window.App.watchForNewBuild({ intervalMs: 60000 });
       document.querySelectorAll('[data-build]').forEach((el) => {
         el.textContent = `build ${h.build || '?'}${h.features && h.features.adminTokenHeader ? ' · token-auth' : ''}`;
         el.title = 'If this does not match the version you just deployed, the deployment is stale.';
@@ -95,10 +96,12 @@
   }
 
   function markActiveNav() {
-    const path = location.pathname.replace(/\/$/, '') || '/admin';
+    const path = (location.pathname.replace(/\/$/, '') || '/admin').toLowerCase();
     document.querySelectorAll('[data-nav]').forEach((el) => {
-      const href = el.getAttribute('href');
-      el.classList.toggle('active', href === path);
+      const href = (el.getAttribute('href') || '').toLowerCase();
+      // /admin-polls, /admin/polls and /admin-polls.html all mean the same page
+      const norm = (v) => v.replace(/^\/admin\//, '/admin-').replace(/\.html$/, '');
+      el.classList.toggle('active', norm(href) === norm(path));
     });
   }
 

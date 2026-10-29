@@ -57,7 +57,7 @@
           </p>
           <div class="poll-actions" style="margin-top:14px">
             ${nextDraft ? `<button class="btn btn-primary" data-start="${nextDraft.id}">▶ Start: ${escapeHtml(nextDraft.question.slice(0, 38))}${nextDraft.question.length > 38 ? '…' : ''}</button>` : ''}
-            <a class="btn btn-ghost" href="/admin/polls">+ New poll</a>
+            <a class="btn btn-ghost" href="/admin-polls">+ New poll</a>
             <a class="btn btn-ghost" href="/display" target="_blank" rel="noopener">🖥 Big screen</a>
           </div>
         </div>`;
@@ -181,7 +181,7 @@
         </div>
         <div class="results">${UI.resultsHtml(live.results, { max: 10 })}</div>
         <div class="row" style="gap:8px;margin-top:14px;flex-wrap:wrap">
-          <a class="btn btn-ghost btn-sm" href="/admin/history">Full report</a>
+          <a class="btn btn-ghost btn-sm" href="/admin-history">Full report</a>
           <button class="btn btn-ghost btn-sm" data-id="${live.id}" data-poll-act="export">⬇ Export CSV</button>
           <span class="mute-sm" style="margin-left:auto">Updated live</span>
         </div>
@@ -199,7 +199,7 @@
             <div class="eyebrow">Queue</div>
             <div class="card-title" style="margin-top:4px">Ready to run (${state.polls.filter((p) => p.status === 'draft').length})</div>
           </div>
-          <a class="btn btn-ghost btn-sm" href="/admin/polls">Manage</a>
+          <a class="btn btn-ghost btn-sm" href="/admin-polls">Manage</a>
         </div>
         ${drafts.length
           ? drafts
@@ -210,7 +210,7 @@
             <div class="poll-item-meta">${UI.metaChips(p)}</div>
             <div class="poll-actions">
               <button class="btn btn-primary" data-start="${p.id}">▶ Start</button>
-              <a class="btn btn-ghost" href="/admin/polls?edit=${p.id}">✏️ Edit</a>
+              <a class="btn btn-ghost" href="/admin-polls?edit=${p.id}">✏️ Edit</a>
             </div>
           </div>`
               )
@@ -287,10 +287,10 @@
           </div>
         </div>
         <div class="grid-3">
-          <a class="btn btn-primary" href="/admin/polls">+ Create poll</a>
+          <a class="btn btn-primary" href="/admin-polls">+ Create poll</a>
           <a class="btn btn-ghost" href="/display" target="_blank" rel="noopener">🖥 Big screen</a>
           <button class="btn btn-ghost" id="show-qr">🔗 Join link</button>
-          <a class="btn btn-ghost" href="/admin/participants">👥 Participants</a>
+          <a class="btn btn-ghost" href="/admin-participants">👥 Participants</a>
           <button class="btn btn-ghost" id="event-settings">⚙️ Event settings</button>
           <button class="btn btn-ghost" id="change-password">🔑 Password</button>
           <button class="btn btn-ghost" id="session-check">🩺 Session check</button>
@@ -734,7 +734,7 @@
   }
 
   function openEditor(poll) {
-    window.location.href = `/admin/polls?edit=${poll.id}`;
+    window.location.href = `/admin-polls?edit=${poll.id}`;
   }
 
   document.getElementById('open-password')?.addEventListener('click', showPasswordModal);

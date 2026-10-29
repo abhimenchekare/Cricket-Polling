@@ -15,6 +15,103 @@ const POLL_SELECT = `
     FROM polls p
 `;
 
+/* ------------------------------------------------------------------ */
+/* Batched reads.                                                     */
+/*                                                                    */
+/* Neon answers in ~230 ms per round-trip, so anything that loops over */
+/* polls (history, admin list) MUST NOT issue one query per poll —    */
+/* 12 history polls x 4 queries was a 9-second page load. These        */
+/* helpers collapse that into two parallel round-trips instead.        */
+/* ------------------------------------------------------------------ */
+
+/** ids that make up the participant's world: the live poll + recent closed ones. */
+const VISIBLE_IDS = `(SELECT id FROM (
+    (SELECT id FROM polls WHERE status IN ('active','paused')
+      ORDER BY COALESCE(started_at, 0) DESC, id DESC LIMIT 1)
+    UNION
+    (SELECT id FROM polls WHERE status = 'closed' ORDER BY COALESCE(closed_at, 0) DESC, id DESC LIMIT 12)
+  ) _ids)`;
+
+const ALL_IDS = '(SELECT id FROM polls)';
+
+const LIVE_POLL_COLS = `
+  SELECT p.*,
+         (SELECT COUNT(*)::int FROM votes v WHERE v.poll_id = p.id) AS total_votes,
+         (SELECT COUNT(*)::int FROM options o WHERE o.poll_id = p.id) AS option_count
+    FROM polls p`;
+
+/** Live poll + history in ONE round-trip, tagged with a slot column. */
+const LIVE_AND_HISTORY = `
+  SELECT 'live'::text AS slot, t.* FROM (
+    ${LIVE_POLL_COLS}
+     WHERE p.status IN ('active','paused')
+     ORDER BY COALESCE(p.started_at, 0) DESC, p.id DESC LIMIT 1
+  ) t
+  UNION ALL
+  SELECT 'latest_closed'::text AS slot, t.* FROM (
+    ${LIVE_POLL_COLS}
+     WHERE p.status = 'closed'
+     ORDER BY COALESCE(p.closed_at, 0) DESC, p.id DESC LIMIT 1
+  ) t
+  UNION ALL
+  SELECT 'history'::text AS slot, t.* FROM (
+    ${LIVE_POLL_COLS}
+     WHERE p.status = 'closed' AND p.show_results <> 'never'
+     ORDER BY COALESCE(p.closed_at, 0) DESC, p.id DESC LIMIT 12
+  ) t`;
+
+/**
+ * Options, vote counts, "my votes" and every bid guess for a set of polls, as four JSON
+ * arrays in a single round-trip. "mine" is empty when nobody is signed in.
+ */
+function bulkSql(ids) {
+  return `
+  SELECT
+    COALESCE((SELECT json_agg(x) FROM (
+      SELECT poll_id, id, label, emoji, position FROM options
+       WHERE poll_id IN ${ids} ORDER BY position, id) x), '[]'::json) AS options,
+    COALESCE((SELECT json_agg(x) FROM (
+      SELECT poll_id, option_id, COUNT(*)::int AS votes FROM votes
+       WHERE poll_id IN ${ids} GROUP BY poll_id, option_id) x), '[]'::json) AS counts,
+    COALESCE((SELECT json_agg(x) FROM (
+      SELECT poll_id, option_id, guess_lakh FROM votes
+       WHERE participant_id = $1 AND poll_id IN ${ids}) x), '[]'::json) AS mine,
+    COALESCE((SELECT json_agg(x) FROM (
+      SELECT v.poll_id, v.guess_lakh, v.created_at,
+             p.id AS participant_id, p.name, p.employee_id
+        FROM votes v JOIN participants p ON p.id = v.participant_id
+       WHERE v.poll_id IN ${ids} AND v.guess_lakh IS NOT NULL
+       ORDER BY v.created_at ASC, v.id ASC) x), '[]'::json) AS guesses`;
+}
+
+/** Group bulk rows by poll id so assembling a poll is pure in-memory work. */
+function indexBulk(bulk) {
+  const options = new Map();
+  const counts = new Map();
+  const mine = new Map();
+  const guesses = new Map();
+
+  for (const o of (bulk && bulk.options) || []) {
+    if (!options.has(o.poll_id)) options.set(o.poll_id, []);
+    options.get(o.poll_id).push({ id: o.id, label: o.label, emoji: o.emoji, position: o.position });
+  }
+  for (const c of (bulk && bulk.counts) || []) {
+    if (!counts.has(c.poll_id)) counts.set(c.poll_id, []);
+    counts.get(c.poll_id).push({ option_id: c.option_id, votes: Number(c.votes) });
+  }
+  for (const m of (bulk && bulk.mine) || []) mine.set(m.poll_id, m);
+  for (const g of (bulk && bulk.guesses) || []) {
+    if (!guesses.has(g.poll_id)) guesses.set(g.poll_id, []);
+    guesses.get(g.poll_id).push(g);
+  }
+  return {
+    optionsOf: (id) => options.get(id) || [],
+    countsOf: (id) => counts.get(id) || [],
+    mineOf: (id) => mine.get(id) || null,
+    guessesOf: (id) => guesses.get(id) || []
+  };
+}
+
 async function getPoll(id) {
   return one(`${POLL_SELECT} WHERE p.id = $1`, [id]);
 }
@@ -42,6 +139,11 @@ async function getResults(pollId) {
       pollId
     ])
   ]);
+  return buildResults(options, counts);
+}
+
+/** Pure: turn option rows + per-option counts into the results payload. */
+function buildResults(options, counts) {
   const map = new Map(counts.map((c) => [c.option_id, Number(c.votes)]));
   const total = counts.reduce((sum, c) => sum + Number(c.votes), 0);
   const rows = options.map((o) => {
@@ -131,8 +233,13 @@ function buildBidDistribution(guesses, actualLakh) {
 }
 
 async function getBidResults(poll, participantId = null) {
-  const actualLakh = poll.actual_lakh == null ? null : Number(poll.actual_lakh);
   const guesses = await getBidGuesses(poll.id);
+  return buildBidResults(poll, guesses, participantId);
+}
+
+/** Pure: rank a known list of guesses against the sold price. */
+function buildBidResults(poll, guesses, participantId = null) {
+  const actualLakh = poll.actual_lakh == null ? null : Number(poll.actual_lakh);
   const ranked = actualLakh == null ? [] : rankBidGuesses(guesses, actualLakh);
   const winners = ranked.filter((r) => r.rank <= 3).slice(0, 3);
 
@@ -219,19 +326,17 @@ function resultsVisibleToParticipants(poll) {
   return false;
 }
 
-async function serializePoll(poll, { includeResults = false, participantId = null } = {}) {
+/**
+ * Assemble one poll's payload. `ctx` comes from indexBulk() so this is pure memory work —
+ * no queries. When ctx is omitted (single-poll callers) the data is fetched, which costs a
+ * round-trip or two but is only used on one-poll paths.
+ */
+function assemblePoll(poll, ctx, { includeResults = false, participantId = null } = {}) {
   if (!poll) return null;
   const isBid = poll.poll_type === 'bid';
-  const [options, votedOptionId, voteRow] = await Promise.all([
-    isBid ? Promise.resolve([]) : getOptions(poll.id),
-    getVotedOptionId(poll.id, participantId),
-    participantId
-      ? one('SELECT option_id, guess_lakh FROM votes WHERE poll_id = $1 AND participant_id = $2', [
-          poll.id,
-          participantId
-        ])
-      : Promise.resolve(null)
-  ]);
+  const options = ctx.optionsOf(poll.id);
+  const voteRow = participantId ? ctx.mineOf(poll.id) : null;
+  const votedOptionId = voteRow ? voteRow.option_id : null;
   const totalVotes = Number(poll.total_votes || 0);
   const endsAt = poll.ends_at ? Number(poll.ends_at) : null;
   const remainingMs =
@@ -270,7 +375,9 @@ async function serializePoll(poll, { includeResults = false, participantId = nul
   };
 
   if (includeResults) {
-    payload.results = isBid ? await getBidResults(poll, participantId) : await getResults(poll.id);
+    payload.results = isBid
+      ? buildBidResults(poll, ctx.guessesOf(poll.id), participantId)
+      : buildResults(options, ctx.countsOf(poll.id));
     payload.resultsVisible = true;
   } else {
     payload.results = null;
@@ -284,6 +391,13 @@ async function serializePoll(poll, { includeResults = false, participantId = nul
     }
   }
   return payload;
+}
+
+/** Single-poll convenience wrapper (fetch then assemble). */
+async function serializePoll(poll, opts = {}) {
+  if (!poll) return null;
+  const bulk = await one(bulkSql(`(${Number(poll.id)})`), [opts.participantId || null]);
+  return assemblePoll(poll, indexBulk(bulk), opts);
 }
 
 async function currentPollRow() {
@@ -307,23 +421,35 @@ async function currentPollRow() {
 async function buildPublicState(participantId = null) {
   await sweepExpiredPolls();
 
-  const [settings, { poll, kind }] = await Promise.all([allSettings(), currentPollRow()]);
-  const visible = resultsVisibleToParticipants(poll);
-
-  const [serialized, historyRows, participants, online] = await Promise.all([
-    serializePoll(poll, { includeResults: visible, participantId }),
-    q(
-      `${POLL_SELECT} WHERE p.status = 'closed' AND p.show_results <> 'never'
-        ORDER BY COALESCE(p.closed_at, 0) DESC, p.id DESC LIMIT 12`
+  // Everything below runs in ONE parallel round-trip (two queries) instead of the ~48
+  // sequential ones this used to need. Keep it that way: /api/state is polled every 2 s.
+  const [core, rows, bulk] = await Promise.all([
+    one(
+      `SELECT (SELECT COALESCE(json_object_agg(key, value), '{}'::json) FROM settings) AS settings,
+              (SELECT COUNT(*)::int FROM participants) AS participants,
+              (SELECT COUNT(*)::int FROM participants WHERE last_seen_at > $1) AS online`,
+      [Date.now() - 2 * 60 * 1000]
     ),
-    getParticipantCount(),
-    getOnlineCount()
+    q(LIVE_AND_HISTORY),
+    one(bulkSql(VISIBLE_IDS), [participantId])
   ]);
 
-  const history = [];
-  for (const h of historyRows) {
-    history.push(await serializePoll(h, { includeResults: true, participantId }));
-  }
+  const ctx = indexBulk(bulk);
+  const settings = (core && core.settings) || {};
+
+  const liveRow = rows.find((r) => r.slot === 'live') || null;
+  const latestClosed = rows.find((r) => r.slot === 'latest_closed') || null;
+  const historyRows = rows
+    .filter((r) => r.slot === 'history')
+    .sort((a, b) => Number(b.closed_at || 0) - Number(a.closed_at || 0) || b.id - a.id);
+  const poll = liveRow || latestClosed || null;
+  const kind = liveRow ? 'live' : poll ? 'closed' : 'none';
+
+  const visible = resultsVisibleToParticipants(poll);
+  const serialized = assemblePoll(poll, ctx, { includeResults: visible, participantId });
+  const history = historyRows.map((h) =>
+    assemblePoll(h, ctx, { includeResults: true, participantId })
+  );
 
   return {
     serverTime: Date.now(),
@@ -335,12 +461,12 @@ async function buildPublicState(participantId = null) {
       joinRequiresCode: settings.join_requires_code === '1'
     },
     stats: {
-      participants,
-      online,
+      participants: Number(core ? core.participants : 0),
+      online: Number(core ? core.online : 0),
       votesOnCurrent: serialized ? serialized.totalVotes : 0
     },
     poll: serialized,
-    pollContext: serialized ? kind : 'none',
+    pollContext: kind,
     history
   };
 }
@@ -367,23 +493,32 @@ function publicVersion(state) {
 async function buildAdminState() {
   await sweepExpiredPolls();
 
-  const [pollRows, settings, participants, online, blocked, totalVotes] = await Promise.all([
+  // One parallel round-trip for everything (was one query per poll, ~40 round-trips).
+  const [pollRows, core, bulk, activity] = await Promise.all([
     q(`${POLL_SELECT} ORDER BY p.id DESC`),
-    allSettings(),
-    getParticipantCount(),
-    getOnlineCount(),
-    scalar('SELECT COUNT(*)::int AS c FROM participants WHERE blocked = 1'),
-    scalar('SELECT COUNT(*)::int AS c FROM votes')
+    one(`SELECT (SELECT COALESCE(json_object_agg(key, value), '{}'::json) FROM settings) AS settings,
+                (SELECT COUNT(*)::int FROM participants) AS participants,
+                (SELECT COUNT(*)::int FROM participants WHERE last_seen_at > $1) AS online,
+                (SELECT COUNT(*)::int FROM participants WHERE blocked = 1) AS blocked,
+                (SELECT COUNT(*)::int FROM votes) AS total_votes`,
+      [Date.now() - 2 * 60 * 1000]),
+    one(bulkSql(ALL_IDS), [null]),
+    q('SELECT id, actor, action, detail, created_at FROM activity_log ORDER BY id DESC LIMIT 25')
   ]);
 
-  const polls = [];
-  for (const p of pollRows) {
+  const ctx = indexBulk(bulk);
+  const settings = (core && core.settings) || {};
+  const participants = Number(core ? core.participants : 0);
+  const online = Number(core ? core.online : 0);
+
+  const polls = pollRows.map((p) => {
     const isBid = p.poll_type === 'bid';
-    const [options, results] = await Promise.all([
-      isBid ? Promise.resolve([]) : getOptions(p.id),
-      isBid ? getBidResults(p) : getResults(p.id)
-    ]);
-    polls.push({
+    const options = isBid ? [] : ctx.optionsOf(p.id).map((o) => ({
+      id: o.id,
+      label: o.label,
+      emoji: o.emoji
+    }));
+    return {
       id: p.id,
       pollType: isBid ? 'bid' : 'choice',
       playerName: p.player_name || null,
@@ -407,13 +542,11 @@ async function buildAdminState() {
       totalVotes: Number(p.total_votes || 0),
       optionCount: Number(p.option_count || 0),
       options,
-      results
-    });
-  }
-
-  const activity = await q(
-    'SELECT id, actor, action, detail, created_at FROM activity_log ORDER BY id DESC LIMIT 25'
-  );
+      results: isBid
+        ? buildBidResults(p, ctx.guessesOf(p.id))
+        : buildResults(options, ctx.countsOf(p.id))
+    };
+  });
 
   return {
     serverTime: Date.now(),
@@ -433,8 +566,8 @@ async function buildAdminState() {
     ].join('~'),
     stats: {
       participants: Number(participants),
-      blocked: Number(blocked),
-      totalVotes: Number(totalVotes),
+      blocked: Number(core ? core.blocked : 0),
+      totalVotes: Number(core ? core.total_votes : 0),
       onlineParticipants: Number(online),
       activePolls: polls.filter((p) => p.status === 'active').length,
       closedPolls: polls.filter((p) => p.status === 'closed').length,
@@ -446,6 +579,8 @@ async function buildAdminState() {
 
 module.exports = {
   POLL_SELECT,
+  assemblePoll,
+  indexBulk,
   getBidResults,
   getBidGuesses,
   rankBidGuesses,
