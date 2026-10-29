@@ -9,6 +9,9 @@ const config = require('../config');
 const ladder = require('../bidladder');
 const auction = require('../auction');
 
+/* The auction moves fast: a shout opens a 10 second round unless the admin picks otherwise. */
+const SHOUT_DEFAULT_SECONDS = 10;
+
 const router = express.Router();
 
 /* --------------------------------- login --------------------------------- */
@@ -612,7 +615,6 @@ router.get('/polls/:id/guesses', async (req, res, next) => {
     const anonymous = Number(poll.anonymous) === 1;
     const sold = poll.actual_lakh == null ? null : Number(poll.actual_lakh);
     const ladder = require('../bidladder');
-const auction = require('../auction');
 
     res.json({
       poll: {
@@ -987,7 +989,7 @@ router.post('/shout', async (req, res, next) => {
     }
 
     const timerSeconds =
-      Number(req.body?.timerSeconds) > 0 ? Math.min(Number(req.body.timerSeconds), 3600) : 60;
+      Number(req.body?.timerSeconds) > 0 ? Math.min(Number(req.body.timerSeconds), 3600) : SHOUT_DEFAULT_SECONDS;
     const now = Date.now();
 
     const poll = await one(

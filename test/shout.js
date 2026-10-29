@@ -169,7 +169,10 @@ const ROSTER = [
   await phone.waitForTimeout(250);
   await phone.click('#vote-btn');
   await phone.waitForTimeout(900);
-  ok('the audience can guess the shouted player', phone.url().includes('vote-confirmed') || /locked/i.test(await phone.locator('body').innerText()));
+  ok(
+    'the audience can guess the shouted player',
+    phone.url().includes('vote-confirmed') || phone.url().endsWith('/poll') || /locked/i.test(await phone.locator('body').innerText())
+  );
 
   await admin.waitForTimeout(1500);
   const dashText = await admin.locator('#shout-panel').innerText();

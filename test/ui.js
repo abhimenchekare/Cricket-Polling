@@ -138,11 +138,13 @@ const PLAYER = `UI Player ${Date.now() % 100000}`;
 
   await p1.click('#vote-btn');
   await p1.waitForURL('**/vote-confirmed**', { timeout: 9000 });
-  await p1.waitForTimeout(900);
+  await p1.waitForTimeout(250);
   ok('confirmation page reports the locked guess', /Cr|L/.test((await p1.locator('#choice').textContent()) || ''));
   await shot(p1, '08-guess-confirmed-mobile.png');
 
-  await p1.goto(`${BASE}/poll`, { waitUntil: 'networkidle' });
+  // the confirmation is a stop-off, not a destination — it returns to the poll on its own
+  await p1.waitForURL('**/poll', { timeout: 9000 });
+  ok('confirmation returns to the poll by itself', p1.url().endsWith('/poll'));
   await p1.waitForTimeout(1500);
   ok('page shows the already-guessed state', (await p1.locator('.voted-state, #vote-btn').count()) >= 0);
   ok('cannot guess twice', (await p1.locator('#vote-btn:not([disabled])').count()) === 0);

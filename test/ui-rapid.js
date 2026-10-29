@@ -104,10 +104,10 @@ const watch = (page, tag) => {
   if (shouted.data.shouted) await api('/api/admin/shout/undo', { method: 'POST', body: JSON.stringify({ confirm: true }) });
 
   console.log('\n🔒  Defaults');
-  ok('60s is the default when nothing is stored', (await api('/api/admin/shout', {
+  ok('10s is the default when nothing is stored', (await api('/api/admin/shout', {
     method: 'POST',
     body: JSON.stringify({})
-  })).data.poll.timerSeconds === 60);
+  })).data.poll.timerSeconds === 10);
   const liveNow = (await api('/api/admin/state')).data.polls.find((p) => p.status === 'active');
   if (liveNow) await api(`/api/admin/polls/${liveNow.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'close' }) });
   await api('/api/admin/shout/undo', { method: 'POST', body: JSON.stringify({ confirm: true }) }).catch(() => {});

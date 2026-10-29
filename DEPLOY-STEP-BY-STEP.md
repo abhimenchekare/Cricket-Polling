@@ -158,7 +158,7 @@ Vercel bakes environment variables into each deployment; the running one will **
 3. **Auction list** (`/admin/players`) → paste your players, one per line → check the order with `↑ ↓`.
    This is the only place a player name is ever typed. Optional role and base price:
    `Rohit Sharma, Batter, 2 Cr`.
-4. **Shout settings** card on the dashboard → pick the round length (10s / 15s / … default 60s).
+4. **Shout settings** card on the dashboard → pick the round length (10s / 15s / … default **10s**).
 5. Delete any sample polls you do not need.
 
 ---

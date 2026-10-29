@@ -150,11 +150,18 @@ async function cleanLeftovers() {
 
   await p.click('#vote-btn');
   await p.waitForURL('**/vote-confirmed**', { timeout: 12000 });
-  await p.waitForTimeout(1200);
+  await p.waitForTimeout(250);
   const confirmText = await p.locator('body').innerText();
   ok('confirmation shows the locked price', confirmText.includes(chipValue.trim()), `want "${chipValue}" in page`);
   ok('confirmation uses guess wording', /Guess locked in/i.test(confirmText));
+  ok('confirmation counts down back to the auction', (await p.locator('#confirm-return').count()) === 1);
   await shot(p, 'b3-bid-confirmed.png');
+
+  // it is a confirmation, not a destination: the phone returns to the poll by itself
+  await p.waitForURL('**/poll', { timeout: 8000 });
+  ok('confirmation returns to the poll on its own', p.url().endsWith('/poll'));
+  await p.waitForTimeout(600);
+  ok('and the poll page shows the round again', /player|bid|range/i.test(await p.locator('body').innerText()));
 
   console.log('\n💰 Admin enters the hammer price');
   await admin.goto(`${BASE}/admin`, { waitUntil: 'networkidle' });

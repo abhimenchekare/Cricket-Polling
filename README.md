@@ -12,7 +12,7 @@ A complete live polling website for your office cricket auction, built to run **
 
 ---
 
-## What this app does (v3.1.4 — auction list + SHOUT)
+## What this app does (v3.2.0 — auction list + SHOUT)
 
 An office-cricket-auction companion for the audience's phones.
 
@@ -172,7 +172,7 @@ On the **Dashboard**, the top panel is the auction queue:
 Press it once and, in under a second, every phone and the projector announce
 **"ON THE BLOCK — `<player>`"** with a full-screen splash, then land on the slider. The round opens
 with the countdown from your **Shout settings** card (10s / 15s / 20s / 30s / 45s / 60s / 90s / 2 min,
-remembered in your browser; default 60s).
+remembered in your browser; default **10s**).
 
 ### Step 3 — enter the sold price
 
@@ -212,9 +212,15 @@ the three winners of that player would be lost.
 The auction runs for hours, so the loop is one tap. The **Shout settings** card on the dashboard
 (just below the shout panel) picks the countdown that every SHOUT will use:
 
-**10s · 15s · 20s · 30s · 45s · 60s · 90s · 2 min**, remembered in your browser (default 60s).
-Changing it affects the *next* shout; a round already running keeps its own clock, and `+30s` in the
-live control panel extends it.
+**10s · 15s · 20s · 30s · 45s · 60s · 90s · 2 min**, remembered in your browser. Out of the box a
+shout opens a **10 second** round — the auction pace. Changing it affects the *next* shout; a round
+already running keeps its own clock, and `+30s` in the live control panel extends it.
+
+### After a guess, the phone goes back on its own
+
+The **"Guess locked in!"** screen is a confirmation, not a destination. It shows your guess and then
+returns to the auction page by itself after ~1.2 s, so nobody is stranded off the slider when the next
+player is shouted. There is a `Stay here` button if someone wants to read it first.
 
 Countdowns under a minute show as plain seconds (`15s`, `8s`); longer ones stay `mm:ss`.
 
@@ -578,15 +584,15 @@ npm run test:config                # vercel.json / rewrite / no-socket checks
 npm run test:perf                  # perceived load speed
 ```
 
-**Current results (local, v3.1.4), all with zero failures:**
+**Current results (local, v3.2.0), all with zero failures:**
 
 | Suite | Checks | What it proves |
 | --- | --- | --- |
 | `e2e` | 117 | auth, poll CRUD, join, duplicate + post-deadline blocking, timers, visibility, reset, CSV |
 | `bid` | 49 | ladder steps, lakh storage, ranking, three winners |
 | **`shout`** | **34** | paste → order → SHOUT → splash on the phone → sold price → SOLD → next SHOUT, plus undo/skip/guards |
-| `ui` | 31 | join, dashboard, projector, mobile layouts |
-| `ui-bid` | 25 | the full slider round on an iPhone 13 |
+| `ui` | 32 | join, dashboard, projector, mobile layouts, auto-return from the confirmation |
+| `ui-bid` | 28 | the full slider round on an iPhone 13, incl. the bounce back to the poll |
 | `ui-rapid` | 18 | 10s…2 min presets, remembered across reloads, used by the next SHOUT |
 | `ui-session` | 30 | admin sign-in/session/logout |
 | `live` | 10 | start→phone 276 ms, vote→projector 123 ms, price→winners 244 ms, fallback polling |
@@ -671,4 +677,4 @@ role and base price, and the price you type when the hammer falls. That is all i
 
 ---
 
-*Cricket Auction Live Polling — v3.1.4 · Express + Postgres on Vercel · separate from the auction website.*
+*Cricket Auction Live Polling — v3.2.0 · Express + Postgres on Vercel · separate from the auction website.*

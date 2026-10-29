@@ -238,8 +238,10 @@
   }
 
   /** Countdown for the round a shout opens (remembered between shouts). */
+  const SHOUT_DEFAULT_SECONDS = 10;
+
   function shoutSeconds() {
-    return Number(localStorage.getItem('shout_seconds')) || 60;
+    return Number(localStorage.getItem('shout_seconds')) || SHOUT_DEFAULT_SECONDS;
   }
 
   function renderKpis(state) {
@@ -463,7 +465,7 @@
                   `<button type="button" data-sec="${sec}" class="${
                     shoutSeconds() === sec
                       ? 'active'
-                      : !localStorage.getItem('shout_seconds') && sec === 60
+                      : !localStorage.getItem('shout_seconds') && sec === SHOUT_DEFAULT_SECONDS
                         ? 'active'
                         : ''
                   }">${sec < 60 ? sec + 's' : sec / 60 + ' min'}</button>`
