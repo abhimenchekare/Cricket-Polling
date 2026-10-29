@@ -74,4 +74,34 @@ function stepDistance(a, b) {
   return Math.abs(ia - ib);
 }
 
-module.exports = { LADDER_LAKH, label, shortLabel, isValidGuess, nearestOnLadder, indexOf, stepDistance };
+/**
+ * Parse a price the host typed by hand into lakh. Accepts the shapes a human actually types:
+ *   "1.85 Cr" → 185   "1.85cr" → 185   "1.85" → 185   "185 L" → 185   "185" → 185   "2 Cr" → 200
+ * Returns null when it is not a usable price.
+ */
+function parsePrice(text) {
+  const raw = String(text == null ? '' : text).trim().toLowerCase();
+  if (!raw) return null;
+  const m = raw.match(/^(?:₹|rs\.?\s*)?([0-9]+(?:\.[0-9]+)?)\s*(cr|crore|crores|l|lakh|lakhs|k)?\.?$/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const unit = m[2];
+  let lakh;
+  if (unit === 'l' || unit === 'lakh' || unit === 'lakhs') lakh = n;
+  else if (unit === 'cr' || unit === 'crore' || unit === 'crores') lakh = n * 100;
+  else lakh = n < 100 ? n * 100 : n; // bare number: "1.85" means crore, "185" means lakh
+  const rounded = Math.round(lakh);
+  return rounded > 0 && rounded <= 10000 ? rounded : null;
+}
+
+module.exports = {
+  LADDER_LAKH,
+  label,
+  shortLabel,
+  isValidGuess,
+  nearestOnLadder,
+  indexOf,
+  stepDistance,
+  parsePrice
+};

@@ -285,8 +285,12 @@ router.post('/vote', async (req, res, next) => {
     }
 
     const pollId = Number(req.body?.pollId);
-    const optionId = Number(req.body?.optionId);
     const rawGuess = req.body?.guessLakh;
+    if (req.body?.optionId !== undefined) {
+      return res.status(400).json({
+        error: 'Multiple-choice polls have been removed — pick a price with the slider'
+      });
+    }
     if (!Number.isInteger(pollId)) {
       return res.status(400).json({ error: 'Invalid vote request' });
     }
@@ -310,25 +314,13 @@ router.post('/vote', async (req, res, next) => {
       return res.status(409).json({ error: 'Time is up for this poll' });
     }
 
-    const isBid = poll.poll_type === 'bid';
-    let guessLakh = null;
-    let option = null;
-
-    if (isBid) {
-      // Bid round: the "vote" is a price from the auction ladder.
-      guessLakh = Number(rawGuess);
-      if (!ladder.isValidGuess(guessLakh)) {
-        return res.status(400).json({
-          error: 'Pick a price from the ladder (20 L up to 30.00 Cr)',
-          ladder: true
-        });
-      }
-    } else {
-      if (!Number.isInteger(optionId)) {
-        return res.status(400).json({ error: 'Invalid vote request' });
-      }
-      option = await one('SELECT * FROM options WHERE id = $1 AND poll_id = $2', [optionId, pollId]);
-      if (!option) return res.status(400).json({ error: 'That option is not part of this poll' });
+    /* Slider-only: a submission is always a price from the auction ladder. */
+    const guessLakh = Number(rawGuess);
+    if (!ladder.isValidGuess(guessLakh)) {
+      return res.status(400).json({
+        error: 'Pick a price from the ladder (20 L up to 30.00 Cr)',
+        ladder: true
+      });
     }
 
     const already = await one(
@@ -336,14 +328,11 @@ router.post('/vote', async (req, res, next) => {
       [pollId, req.participant.id]
     );
     if (already) {
-      const chosen = already.option_id
-        ? await one('SELECT label FROM options WHERE id = $1', [already.option_id])
-        : null;
       return res.status(409).json({
-        error: isBid ? 'You already locked a guess for this player' : 'You have already voted in this poll',
+        error: 'You already locked a guess for this player',
         alreadyVoted: true,
-        optionId: already.option_id,
-        optionLabel: chosen?.label || null,
+        optionId: null,
+        optionLabel: null,
         guessLakh: already.guess_lakh == null ? null : Number(already.guess_lakh),
         guessLabel: already.guess_lakh == null ? null : ladder.label(already.guess_lakh)
       });
@@ -351,9 +340,8 @@ router.post('/vote', async (req, res, next) => {
 
     try {
       await q(
-        'INSERT INTO votes (poll_id, option_id, participant_id, guess_lakh, created_at) VALUES ($1, $2, $3, $4, $5)',
-        // a bid guess has no option row — never pass NaN through to an INTEGER column
-        [pollId, isBid ? null : optionId, req.participant.id, guessLakh, Date.now()]
+        'INSERT INTO votes (poll_id, option_id, participant_id, guess_lakh, created_at) VALUES ($1, NULL, $2, $3, $4)',
+        [pollId, req.participant.id, guessLakh, Date.now()]
       );
     } catch (err) {
       if (err.code === '23505' || err.code === '23P01' || /duplicate key|unique/i.test(err.message)) {
@@ -374,11 +362,11 @@ router.post('/vote', async (req, res, next) => {
     res.json({
       ok: true,
       pollId,
-      pollType: isBid ? 'bid' : 'choice',
-      optionId,
-      optionLabel: isBid ? ladder.label(guessLakh) : option.label,
+      pollType: 'bid',
+      optionId: null,
+      optionLabel: ladder.label(guessLakh),
       guessLakh,
-      guessLabel: isBid ? ladder.label(guessLakh) : null,
+      guessLabel: ladder.label(guessLakh),
       totalVotes: total,
       question: poll.question
     });

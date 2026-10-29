@@ -110,7 +110,8 @@ router.get('/state', async (req, res, next) => {
 /* ---------------------------- poll validation ---------------------------- */
 
 function parsePollPayload(body) {
-  const pollType = body?.pollType === 'bid' ? 'bid' : 'choice';
+  /* Slider-only application: every poll is a bid-range guess. The `poll_type` column stays so
+     old rows keep working, but nothing can create a multiple-choice poll any more. */
   const playerName = String(body?.playerName || '').trim().slice(0, 80) || null;
   let question = String(body?.question || '').trim().slice(0, 200);
   const description = String(body?.description || '').trim().slice(0, 400) || null;
@@ -124,36 +125,21 @@ function parsePollPayload(body) {
   if (!Number.isFinite(timerSeconds) || timerSeconds < 0) timerSeconds = config.defaultTimerSeconds;
   timerSeconds = Math.min(Math.round(timerSeconds), 3600);
 
-  const rawOptions = Array.isArray(body?.options) ? body.options : [];
-  const options = rawOptions
-    .map((o) => ({
-      label: String(o?.label ?? o ?? '').replace(/\s+/g, ' ').trim().slice(0, 120),
-      emoji: String(o?.emoji || '').trim().slice(0, 8) || null
-    }))
-    .filter((o) => o.label.length > 0);
-
   const errors = [];
-  if (pollType === 'bid') {
-    if (!playerName) errors.push('Player name is required for a bid range poll');
-    if (!question) question = `What will be the bid range for ${playerName} player?`;
-  } else if (question.length < 5) {
-    errors.push('Question must be at least 5 characters');
-  }
-  if (pollType === 'choice') {
-    if (options.length < 2) errors.push('Add at least 2 answer options');
-    if (options.length > 10) errors.push('A poll can have at most 10 options');
-  }
+  if (!playerName) errors.push('Player name is required');
+  if (!question) question = `What will be the bid range for ${playerName} player?`;
+  if (question.length < 5) errors.push('Question must be at least 5 characters');
 
   return {
-    pollType,
+    pollType: 'bid',
     playerName,
     question,
     description,
-    category: category || (pollType === 'bid' ? 'Bid range' : null),
+    category: category || 'Bid range',
     showResults,
     anonymous,
     timerSeconds,
-    options: pollType === 'bid' ? [] : options,
+    options: [],
     errors
   };
 }
@@ -238,7 +224,6 @@ router.post('/polls', async (req, res, next) => {
         req.admin.username
       ]
     );
-    if (data.pollType !== 'bid') await replaceOptions(poll.id, data.options);
     await logActivity('poll.created', `Created poll "${data.question}"`, req.admin.username);
     const full = await state.getPoll(poll.id);
     res.status(201).json({ ok: true, poll: await state.serializePoll(full) });
@@ -258,27 +243,10 @@ router.put('/polls/:id', async (req, res, next) => {
     const voteCount = Number(
       (await one('SELECT COUNT(*)::int AS c FROM votes WHERE poll_id = $1', [poll.id])).c
     );
-    if (poll.poll_type === 'bid' && data.pollType !== 'bid' && voteCount > 0) {
-      return res.status(409).json({
-        error: 'This bid round already has guesses, so it cannot become a choice poll. Reset it first.'
-      });
-    }
-
-    if (data.pollType !== 'bid') {
-      if (voteCount > 0 && poll.poll_type !== 'bid') {
-        const current = await state.getOptions(poll.id);
-        const sameOptions =
-          current.length === data.options.length &&
-          current.every((o, i) => o.label.trim() === data.options[i].label);
-        if (!sameOptions) {
-          return res.status(409).json({
-            error:
-              'This poll already has votes, so its answer options cannot be changed. Reset the poll first.'
-          });
-        }
-      } else if (voteCount === 0) {
-        await syncOptions(poll.id, data.options);
-      }
+    // Slider-only: a poll's question/price rules can change while it has guesses; only the
+    // sold price and the countdown are separate actions, so nothing here is blocked by votes.
+    if (voteCount > 0) {
+      await logActivity('poll.updated_with_guesses', `Updated poll #${poll.id}`, req.admin.username);
     }
 
     await q(
@@ -343,24 +311,21 @@ router.post('/polls/:id/duplicate', async (req, res, next) => {
     const now = Date.now();
     const copy = await one(
       `INSERT INTO polls (question, description, category, status, show_results, anonymous,
-                          timer_seconds, remaining_ms, created_at, updated_at, created_by)
-       VALUES ($1, $2, $3, 'draft', $4, $5, $6, $7, $8, $8, $9) RETURNING id`,
+                          timer_seconds, remaining_ms, poll_type, player_name,
+                          created_at, updated_at, created_by)
+       VALUES ($1, $2, $3, 'draft', $4, $5, $6, $7, 'bid', $8, $9, $9, $10) RETURNING id`,
       [
-        `${poll.question} (copy)`,
+        poll.player_name ? `Bid range: ${poll.player_name}` : `${poll.question} (copy)`,
         poll.description,
         poll.category,
         poll.show_results,
         poll.anonymous,
         poll.timer_seconds,
         Number(poll.timer_seconds) * 1000,
+        poll.player_name,
         now,
         req.admin.username
       ]
-    );
-    const options = await state.getOptions(poll.id);
-    await replaceOptions(
-      copy.id,
-      options.map((o) => ({ label: o.label, emoji: o.emoji }))
     );
     await logActivity('poll.duplicated', `Duplicated poll #${poll.id}`, req.admin.username);
     res.status(201).json({ ok: true, id: copy.id });
@@ -572,7 +537,9 @@ router.post('/polls/:id/actual', async (req, res, next) => {
 
     // The sold price is whatever the auction ended at — 1.10 Cr is a real result and is NOT on
     // the guess ladder, so accept any whole-lakh value (the ladder only constrains guesses).
-    const raw = Number(req.body?.lakh);
+    // The host may also type it as text ("1.85 Cr", "185 L", "1.85"), so parse that too.
+    const raw =
+      req.body?.lakh != null ? Number(req.body.lakh) : ladder.parsePrice(req.body?.price);
     if (!Number.isFinite(raw) || raw <= 0) {
       return res.status(400).json({ error: 'Enter the price the player actually sold for' });
     }
@@ -607,6 +574,70 @@ router.post('/polls/:id/actual', async (req, res, next) => {
       actualLabel: ladder.label(lakhValue),
       winners: results.winners,
       totalGuesses: results.totalGuesses
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * The complete guess sheet for ONE poll: every participant, what they guessed, how far off it is
+ * and their rank — plus everyone who has not guessed yet. This is what the host reads out.
+ */
+router.get('/polls/:id/guesses', async (req, res, next) => {
+  try {
+    const poll = await one('SELECT * FROM polls WHERE id = $1', [Number(req.params.id)]);
+    if (!poll) return res.status(404).json({ error: 'Poll not found' });
+
+    const [guesses, everyone, results] = await Promise.all([
+      state.getBidGuesses(poll.id),
+      q('SELECT id, name, employee_id, created_at FROM participants ORDER BY name ASC, id ASC'),
+      state.getBidResults(poll)
+    ]);
+
+    const ranked = state.rankBidGuesses(guesses, poll.actual_lakh == null ? 0 : Number(poll.actual_lakh));
+    const byParticipant = new Map(ranked.map((r) => [Number(r.participantId), r]));
+    const anonymous = Number(poll.anonymous) === 1;
+    const sold = poll.actual_lakh == null ? null : Number(poll.actual_lakh);
+    const ladder = require('../bidladder');
+
+    res.json({
+      poll: {
+        id: poll.id,
+        question: poll.question,
+        playerName: poll.player_name || null,
+        status: poll.status,
+        anonymous,
+        actualLakh: sold,
+        actualLabel: sold == null ? null : ladder.label(sold),
+        showResults: poll.show_results,
+        totalGuesses: guesses.length
+      },
+      revealed: sold != null,
+      winners: results.winners,
+      // guessers first (rank order), then everyone still missing — that is the order the host reads
+      participants: everyone
+        .map((p) => {
+        const row = byParticipant.get(Number(p.id));
+        return {
+          participantId: p.id,
+          name: anonymous ? `Player ${String(p.id).padStart(2, '0')}` : p.name,
+          employeeId: anonymous ? '—' : p.employee_id,
+          hasGuessed: Boolean(row),
+          guessLakh: row ? row.guessLakh : null,
+          guessLabel: row ? row.guessLabel : null,
+          diffLakh: row && sold != null ? row.diffLakh : null,
+          diffLabel: row && sold != null ? row.diffLabel : null,
+          direction: row && sold != null ? row.direction : null,
+          rank: row && sold != null ? row.rank : null,
+            isWinner: Boolean(row && sold != null && row.rank <= 3)
+          };
+        })
+        .sort((a, b) => {
+          if (a.hasGuessed !== b.hasGuessed) return a.hasGuessed ? -1 : 1;
+          if (a.hasGuessed && b.hasGuessed && a.rank && b.rank) return a.rank - b.rank;
+          return String(a.name).localeCompare(String(b.name));
+        })
     });
   } catch (err) {
     next(err);

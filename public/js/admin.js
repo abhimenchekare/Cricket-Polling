@@ -74,7 +74,7 @@
           <div>
             <div class="eyebrow">Live control</div>
             <div class="card-title" style="margin-top:4px;font-size:19px;line-height:1.25">${escapeHtml(live.question)}</div>
-            ${live.pollType === 'bid' ? `<div class="mute-sm" style="margin-top:6px">🎯 Bid range · <strong style="color:var(--gold-300)">${escapeHtml(live.playerName || 'player')}</strong></div>` : ''}
+            <div class="mute-sm" style="margin-top:6px">🎯 Bid range · <strong style="color:var(--gold-300)">${escapeHtml(live.playerName || 'player')}</strong></div>
           </div>
           ${isPaused ? '<span class="pill pill-paused">PAUSED</span>' : '<span class="pill pill-live"><span class="dot"></span>LIVE</span>'}
         </div>
@@ -83,20 +83,12 @@
             <div class="timer-ring" id="admin-ring" style="--pct:100"><span>⏱</span></div>
             <span id="admin-timer-text">--:--</span>
           </div>
-          <div class="vote-count">${live.pollType === 'bid' ? '🎯' : '🗳️'} <strong>${live.totalVotes}</strong> ${live.pollType === 'bid' ? window.App.plural(live.totalVotes, 'guess', 'guesses') : 'votes'}</div>
+          <div class="vote-count">🎯 <strong>${live.totalVotes}</strong> ${window.App.plural(live.totalVotes, 'guess', 'guesses')}</div>
           <div class="vote-count">👥 <strong>${state.stats.participants}</strong> participants</div>
         </div>
         <div class="poll-actions">${UI.controlButtons(live)}</div>
         <hr class="divider" />
-        ${live.pollType === 'bid' ? '' : `<div class="row-between" style="flex-wrap:wrap;gap:10px">
-          <div class="mute-sm">Results visibility</div>
-          <div class="segmented" style="max-width:330px;flex:1 1 240px">
-            <button data-id="${live.id}" data-visibility="never" class="${live.showResults === 'never' ? 'active' : ''}">Private</button>
-            <button data-id="${live.id}" data-visibility="during" class="${live.showResults === 'during' ? 'active' : ''}">Live</button>
-            <button data-id="${live.id}" data-visibility="after" class="${live.showResults === 'after' ? 'active' : ''}">After close</button>
-          </div>
-        </div>`}
-        ${live.pollType === 'bid' ? bidPricePanel(live) : ''}
+        ${bidPricePanel(live)}
         <div class="row" style="gap:8px;margin-top:14px;flex-wrap:wrap">
           <span class="mute-sm">Restart countdown:</span>
           ${[10, 15, 20, 30, 45, 60, 90, 120]
@@ -109,7 +101,7 @@
       </div>`;
 
     UI.bindActions(els.live, { onEdit: openEditor });
-    if (live.pollType === 'bid') wireBidPricePanel(live);
+    wireBidPricePanel(live);
     els.live.querySelectorAll('[data-timer]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const seconds = Number(btn.dataset.timer);
@@ -177,7 +169,7 @@
             <div class="eyebrow">${live.status === 'closed' ? 'Final result' : 'Live result'}</div>
             <div class="card-title" style="margin-top:4px">${escapeHtml(live.question)}</div>
           </div>
-          <span class="pill pill-ghost">${live.totalVotes} votes</span>
+          <span class="pill pill-ghost">${live.totalVotes} ${window.App.plural(live.totalVotes, 'guess', 'guesses')}</span>
         </div>
         <div class="results">${UI.resultsHtml(live.results, { max: 10 })}</div>
         <div class="row" style="gap:8px;margin-top:14px;flex-wrap:wrap">
@@ -239,36 +231,29 @@
       <div class="card" id="rapid-card" style="margin-bottom:16px">
         <div class="card-head">
           <div>
-            <div class="eyebrow">⚡ Rapid round</div>
-            <div class="card-title" style="margin-top:4px">Guess the next player</div>
+            <div class="eyebrow">⚡ Next player</div>
+            <div class="card-title" style="margin-top:4px">Open a bid round in one tap</div>
           </div>
-          <span class="pill pill-live">10–15 SEC</span>
+          <span class="pill pill-live">10–30 SEC</span>
         </div>
         <p class="mute-sm" style="margin:0 0 12px">
-          Fires a round instantly: everyone guesses, voting locks at 0&nbsp;s and the answer appears on every
-          screen by itself. Reuse it for every player in the auction.
+          Type the player on the block, tap start: every phone gets the price slider instantly, guesses
+          lock when the clock hits 0&nbsp;s, and the three closest guesses are declared when you enter the
+          sold price.
         </p>
         <label class="field" style="display:block;margin-bottom:10px">
-          <span class="mute-sm">Question</span>
-          <input class="input" id="rr-question" maxlength="200" value="${escapeHtml(
-            localStorage.getItem('rr_question') || 'Who will win the bidding for the next player?'
-          )}" style="margin-top:6px" />
-        </label>
-        <label class="field" style="display:block;margin-bottom:10px">
-          <span class="mute-sm">Options — one player per line</span>
-          <textarea class="input" id="rr-options" rows="4" placeholder="Rohit&#10;Virat&#10;Hardik&#10;Jasprit" style="margin-top:6px;resize:vertical;font-family:inherit">${escapeHtml(
-            localStorage.getItem('rr_options') || ''
-          )}</textarea>
+          <span class="mute-sm">Player name</span>
+          <input class="input" id="rr-player" maxlength="80" placeholder="e.g. Rohit Sharma" style="margin-top:6px" />
         </label>
         <div class="row-between" style="flex-wrap:wrap;gap:10px;margin-bottom:12px">
           <span class="mute-sm">Countdown</span>
-          <div class="segmented" id="rr-seconds" style="max-width:320px;flex:1 1 220px">
+          <div class="segmented" id="rr-seconds" style="max-width:340px;flex:1 1 220px">
             ${[10, 15, 20, 30, 45, 60]
               .map(
                 (sec) =>
                   `<button type="button" data-sec="${sec}" class="${
                     Number(localStorage.getItem('rr_seconds')) === sec ||
-                    (!localStorage.getItem('rr_seconds') && sec === 15)
+                    (!localStorage.getItem('rr_seconds') && sec === 20)
                       ? 'active'
                       : ''
                   }">${sec}s</button>`
@@ -276,7 +261,7 @@
               .join('')}
           </div>
         </div>
-        <button class="btn btn-gold" id="rr-start" style="width:100%">⚡ Create &amp; start round</button>
+        <button class="btn btn-gold" id="rr-start" style="width:100%">⚡ Start bid round</button>
       </div>
 
       <div class="card">
@@ -452,19 +437,14 @@
     paint();
   }
 
-  /* ⚡ One-tap round: create the poll, then start it with a seconds countdown. */
+  /* ⚡ One-tap bid round: type the player, create and start in a single press. */
   function wireRapidRound() {
-    const questionEl = document.getElementById('rr-question');
-    const optionsEl = document.getElementById('rr-options');
+    const playerEl = document.getElementById('rr-player');
     const secondsEl = document.getElementById('rr-seconds');
     const startBtn = document.getElementById('rr-start');
-    if (!questionEl || !startBtn) return;
+    if (!playerEl || !startBtn) return;
 
-    if (!optionsEl.value.trim()) {
-      optionsEl.value = ['Rohit', 'Virat', 'Hardik', 'Jasprit', 'Rishabh'].join('\n');
-    }
-
-    let seconds = Number(localStorage.getItem('rr_seconds')) || 15;
+    let seconds = Number(localStorage.getItem('rr_seconds')) || 20;
 
     secondsEl.querySelectorAll('button').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -474,40 +454,42 @@
       });
     });
 
-    startBtn.addEventListener('click', async () => {
-      const question = questionEl.value.trim();
-      const options = optionsEl.value
-        .split(/\n|,/)
-        .map((t) => t.trim())
-        .filter(Boolean)
-        .slice(0, 10);
-      if (question.length < 5) return toast('Write a question first', 'err');
-      if (options.length < 2) return toast('Add at least 2 options', 'err');
-
-      localStorage.setItem('rr_question', question);
-      localStorage.setItem('rr_options', options.join('\n'));
-
+    const start = async () => {
+      const playerName = playerEl.value.trim();
+      if (!playerName) {
+        playerEl.focus();
+        return toast('Type the player name first', 'err');
+      }
       startBtn.disabled = true;
       startBtn.textContent = 'Starting…';
       try {
         const created = await API.post('/api/admin/polls', {
-          question,
-          description: `Live guessing round · ${seconds}s`,
-          category: 'Rapid round',
-          showResults: 'after', // reveal automatically when the countdown ends
+          playerName,
+          question: `What will be the bid range for ${playerName} player?`,
+          description: `Bid round · ${seconds}s`,
+          category: 'Bid range',
+          showResults: 'after',
           anonymous: false,
-          timerSeconds: seconds,
-          options: options.map((label) => ({ label }))
+          timerSeconds: seconds
         });
         const id = created.poll.id;
         await API.post(`/api/admin/polls/${id}/action`, { action: 'start', timerSeconds: seconds });
-        toast(`Round live — ${seconds}s on the clock`, 'ok');
+        toast(`${playerName} is live on every phone — ${seconds}s on the clock`, 'ok');
+        playerEl.value = '';
         window.AdminShell.refresh();
       } catch (err) {
         toast(err.message || 'Could not start the round', 'err');
       } finally {
         startBtn.disabled = false;
-        startBtn.innerHTML = '⚡ Create &amp; start round';
+        startBtn.innerHTML = '⚡ Start bid round';
+      }
+    };
+
+    startBtn.addEventListener('click', start);
+    playerEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        start();
       }
     });
   }

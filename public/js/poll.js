@@ -131,7 +131,11 @@
     const p = state.poll;
     els.statsBar.innerHTML = `
       <span class="pill pill-ghost">👥&nbsp;<strong>${state.stats.participants}</strong>&nbsp;participants</span>
-      <span class="pill pill-ghost">🗳️&nbsp;<strong>${p ? p.totalVotes : 0}</strong>&nbsp;votes</span>
+      <span class="pill pill-ghost">🎯&nbsp;<strong>${p ? p.totalVotes : 0}</strong>&nbsp;${window.App.plural(
+        p ? p.totalVotes : 0,
+        'guess',
+        'guesses'
+      )}</span>
       ${p ? '' : '<span class="pill pill-draft">No live poll</span>'}
     `;
   }
@@ -149,98 +153,8 @@
       return;
     }
 
-    if (p.pollType === 'bid') {
-      renderBidPoll(p);
-      return;
-    }
-
-    const hasVoted = p.viewer.hasVoted;
-    const myOption = p.options.find((o) => o.id === p.viewer.votedOptionId);
-    const canVote = p.status === 'active' && !hasVoted;
-
-    const head = `
-      <div class="poll-meta">
-        <span class="eyebrow">${escapeHtml(p.category || 'Live poll')}</span>
-        <div class="row" style="gap:8px">
-          ${p.anonymous ? '<span class="pill pill-ghost">🕶️ Anonymous</span>' : ''}
-          ${statusPill(p.status)}
-        </div>
-      </div>
-      <h2 class="poll-question">${escapeHtml(p.question)}</h2>
-      ${p.description ? `<p class="poll-desc">${escapeHtml(p.description)}</p>` : ''}
-      <div class="row-between" style="gap:12px;margin-bottom:16px">
-        <div class="timer ${p.status === 'active' ? '' : 'is-urgent'}" id="timer" data-state="${p.status}">
-          <div class="timer-ring" id="timer-ring" style="--pct:100"><span>⏱</span></div>
-          <span id="timer-text">--:--</span>
-        </div>
-        <div class="vote-count">🗳️ <strong id="vote-count-num">${p.totalVotes}</strong> votes</div>
-      </div>`;
-
-    if (hasVoted) {
-      els.pollArea.innerHTML = `
-        <div class="card card-hero poll-card">${head}
-          <div class="voted-state pop">
-            <div class="check-ring">
-              <svg viewBox="0 0 24 24"><path d="M4 12.5l5.2 5.2L20 6.8"/></svg>
-            </div>
-            <h3 style="font-size:20px">Your vote is locked in</h3>
-            <p class="muted" style="margin-top:6px;font-size:14px">One vote per participant per poll.</p>
-            ${myOption ? `<div class="choice-chip"><span>${escapeHtml(myOption.emoji || '✅')}</span><span>${escapeHtml(myOption.label)}</span></div>` : ''}
-            <p class="mute-sm" id="waiting-note" style="margin-top:16px">${
-              p.status === 'active'
-                ? p.resultsVisible
-                  ? 'Live results below — watch the bars move'
-                  : 'Results will be revealed by the host'
-                : 'Waiting for the next poll'
-            }</p>
-            <a class="btn btn-ghost btn-sm" href="/vote-confirmed" style="margin-top:10px">View confirmation</a>
-          </div>
-        </div>`;
-      return;
-    }
-
-    if (p.status === 'closed') {
-      els.pollArea.innerHTML = `
-        <div class="card card-hero poll-card">${head}
-          <div class="locked" style="margin-bottom:4px">
-            <span style="font-size:18px">🔒</span>
-            <div><strong>Voting is closed for this poll.</strong><br />${
-              p.resultsVisible ? 'Final results are shown below.' : 'The host has not published these results yet.'
-            }</div>
-          </div>
-        </div>`;
-      return;
-    }
-
-    if (p.status === 'paused') {
-      els.pollArea.innerHTML = `
-        <div class="card card-hero poll-card">${head}
-          <div class="locked" style="border-color:rgba(255,176,32,.35);background:rgba(255,176,32,.08);margin-bottom:14px">
-            <span style="font-size:18px">⏸️</span>
-            <div><strong>Voting is paused.</strong><br />The host will resume in a moment — your screen updates automatically.</div>
-          </div>
-          <div class="options">${p.options.map((o) => optionHtml(o, false, true)).join('')}</div>
-        </div>`;
-      return;
-    }
-
-    // active + not voted
-    els.pollArea.innerHTML = `
-      <div class="card card-hero poll-card">${head}
-        <div class="options" id="options" role="radiogroup" aria-label="Poll options">
-          ${p.options.map((o) => optionHtml(o, o.id === selectedOptionId, false)).join('')}
-        </div>
-        <div class="sticky-action">
-          <button class="btn btn-primary btn-lg btn-block" id="vote-btn" disabled>
-            Select an option to vote
-          </button>
-        </div>
-        <p class="mute-sm center" style="margin-top:10px">You can vote only once in this poll.</p>
-      </div>`;
-    wireVoting(p);
+    renderBidPoll(p);
   }
-
-  /* ══════════════════════════ bid range poll ══════════════════════════ */
 
   function bidLadder() {
     return (meta && meta.bid && meta.bid.ladder) || [];
@@ -440,72 +354,6 @@
     paint();
   }
 
-  function optionHtml(option, selected, disabled) {
-    return `
-      <button type="button" class="option ${selected ? 'selected' : ''}" data-option="${option.id}"
-              role="radio" aria-checked="${selected}" ${disabled ? 'disabled' : ''}>
-        <span class="option-radio" aria-hidden="true"></span>
-        ${option.emoji ? `<span class="option-emoji" aria-hidden="true">${escapeHtml(option.emoji)}</span>` : ''}
-        <span class="option-label">${escapeHtml(option.label)}</span>
-      </button>`;
-  }
-
-  function wireVoting(poll) {
-    const optionsWrap = document.getElementById('options');
-    const voteBtn = document.getElementById('vote-btn');
-    const sync = () => {
-      const selected = poll.options.find((o) => o.id === selectedOptionId);
-      optionsWrap.querySelectorAll('.option').forEach((el) => {
-        const on = Number(el.dataset.option) === selectedOptionId;
-        el.classList.toggle('selected', on);
-        el.setAttribute('aria-checked', String(on));
-      });
-      if (selected) {
-        voteBtn.disabled = false;
-        voteBtn.textContent = `Vote for ${selected.label}`;
-      } else {
-        voteBtn.disabled = true;
-        voteBtn.textContent = 'Select an option to vote';
-      }
-    };
-
-    optionsWrap.addEventListener('click', (e) => {
-      const btn = e.target.closest('.option');
-      if (!btn || btn.disabled) return;
-      selectedOptionId = Number(btn.dataset.option);
-      haptic(8);
-      sync();
-    });
-
-    voteBtn.addEventListener('click', async () => {
-      if (!selectedOptionId || submitting) return;
-      submitting = true;
-      setBusy(voteBtn, true, 'Submitting…');
-      try {
-        const res = await API.post('/api/vote', { pollId: poll.id, optionId: selectedOptionId });
-        haptic(40);
-        window.App.confetti(1800);
-        toast('Vote submitted!', 'ok');
-        setTimeout(() => {
-          window.location.href = `/vote-confirmed?poll=${res.pollId}`;
-        }, 650);
-      } catch (err) {
-        submitting = false;
-        setBusy(voteBtn, false);
-        if (err.status === 409) {
-          toast(err.data?.alreadyVoted ? 'You already voted in this poll' : err.message, 'info');
-          if (realtime) realtime.poke();
-          else await loadState();
-          if (err.data?.alreadyVoted) window.location.href = '/vote-confirmed';
-        } else {
-          toast(err.message, 'err');
-        }
-      }
-    });
-
-    sync();
-  }
-
   function tickTimer() {
     const timerEl = document.getElementById('timer');
     if (!timerEl || !state || !state.poll) return;
@@ -565,106 +413,64 @@
       return;
     }
 
-    if (p.results.kind === 'bid') {
-      renderBidResults(p);
-      return;
-    }
-
-    const rows = p.results.rows.map((r) => resultRow(r, p.results.leadingOptionId, p.viewer.votedOptionId)).join('');
-    els.resultsArea.innerHTML = `
-      <div class="card fade-up">
-        <div class="card-head">
-          <div>
-            <div class="eyebrow">${p.status === 'closed' ? 'Final results' : 'Live results'}</div>
-            <div class="card-title" style="margin-top:4px">${p.totalVotes} vote${p.totalVotes === 1 ? '' : 's'} counted</div>
-          </div>
-          <span class="pill ${p.status === 'closed' ? 'pill-closed' : 'pill-live'}">${p.status === 'closed' ? 'FINAL' : 'LIVE'}</span>
-        </div>
-        <div class="results">${rows}</div>
-        ${p.anonymous ? '<p class="mute-sm" style="margin-top:12px">🕶️ Individual votes are anonymous in this poll.</p>' : ''}
-      </div>`;
+    renderBidResults(p);
   }
 
+  /* Winners + my own rank for the round just played. */
   function renderBidResults(p) {
-    const r = p.results;
-    const medal = ['🥇', '🥈', '🥉'];
-    const viewer = r.viewer;
+    const r = p.results || {};
+    const mine = r.viewer;
+    const soldLabel = r.actualLabel || '—';
 
-    const winners = r.winners.length
-      ? r.winners
-          .map(
-            (w) => `
-        <div class="bid-winner rank-${w.rank}">
-          <span class="bid-medal">${medal[w.rank - 1] || '#' + w.rank}</span>
-          <div class="grow">
-            <div class="bid-winner-name">${escapeHtml(w.name)}</div>
-            <div class="mute-sm">guessed ${escapeHtml(w.guessLabel)} · ${escapeHtml(w.diffLabel)} ${
-              w.direction === 'exact' ? 'exact!' : w.direction
-            }</div>
-          </div>
-        </div>`
-          )
-          .join('')
-      : '<div class="empty">Nobody guessed in this round.</div>';
+    const mineBlock = mine
+      ? `<div class="bid-winner ${mine.isWinner ? 'rank-' + mine.rank : ''}" style="margin-bottom:12px">
+           <span class="bid-medal">${mine.isWinner ? ['🥇', '🥈', '🥉'][mine.rank - 1] : '🎯'}</span>
+           <div class="grow">
+             <div class="bid-winner-name">Your guess: ${escapeHtml(mine.guessLabel)}</div>
+             <div class="mute-sm">${
+               mine.direction === 'exact'
+                 ? 'Exact price — perfect call!'
+                 : `${escapeHtml(mine.diffLabel)} ${escapeHtml(mine.direction)}`
+             } · rank #${mine.rank} of ${r.totalGuesses}</div>
+           </div>
+         </div>`
+      : '';
+
+    const dist = (r.distribution || []).length
+      ? `<div class="bid-dist" style="margin-top:6px">
+           ${r.distribution
+             .map(
+               (d) => `<div class="bid-dist-row ${d.isActual ? 'is-actual' : ''}">
+                 <span class="bid-dist-label">${escapeHtml(d.label)}</span>
+                 <div class="bar-track"><div class="bar-fill" data-w="${Math.max(6, d.percent)}"></div></div>
+                 <span class="bid-dist-count">${d.count}</span>
+               </div>`
+             )
+             .join('')}
+         </div>`
+      : '';
 
     els.resultsArea.innerHTML = `
       <div class="card fade-up">
         <div class="card-head">
           <div>
-            <div class="eyebrow">Hammer price</div>
-            <div class="card-title" style="margin-top:4px">${escapeHtml(p.playerName || 'This player')} sold for ${escapeHtml(
-              r.actualLabel || '—'
-            )}</div>
+            <div class="eyebrow">Final result</div>
+            <div class="card-title" style="margin-top:4px">Sold for ${escapeHtml(soldLabel)}</div>
           </div>
-          <span class="pill pill-gold">${r.totalGuesses} guess${r.totalGuesses === 1 ? '' : 'es'}</span>
+          <span class="pill pill-gold">🎯 ${r.totalGuesses || 0} ${window.App.plural(
+            r.totalGuesses || 0,
+            'guess',
+            'guesses'
+          )}</span>
         </div>
-
-        ${
-          viewer
-            ? `<div class="bid-you ${viewer.isWinner ? 'is-winner' : ''}">
-                 <div>
-                   <div class="mute-sm">Your guess</div>
-                   <strong>${escapeHtml(viewer.guessLabel)}</strong>
-                   <span class="mute-sm">· ${escapeHtml(viewer.diffLabel)} ${viewer.direction === 'exact' ? 'exact!' : viewer.direction}</span>
-                 </div>
-                 <div class="bid-rank">${viewer.isWinner ? medal[viewer.rank - 1] || '#' + viewer.rank : '#' + viewer.rank}</div>
-               </div>`
-            : ''
-        }
-
-        <div class="eyebrow" style="margin:18px 0 10px">Top 3 closest guesses</div>
-        <div class="bid-winners">${winners}</div>
-
-        <div class="eyebrow" style="margin:18px 0 10px">How the room guessed</div>
-        <div class="bid-dist">
-          ${r.distribution
-            .map(
-              (d) => `
-            <div class="bid-dist-row ${d.isActual ? 'is-actual' : ''}">
-              <span class="bid-dist-label">${escapeHtml(d.label)}${d.isActual ? ' ← sold' : ''}</span>
-              <div class="bar-track"><div class="bar-fill" data-w="${d.percent}"></div></div>
-              <span class="bid-dist-count">${d.count}</span>
-            </div>`
-            )
-            .join('')}
-        </div>
+        ${mineBlock}
+        <div class="eyebrow" style="margin:10px 0 8px">Top 3 closest guesses</div>
+        <div class="bid-winners">${window.App.bidResultRows(r)}</div>
+        <div class="eyebrow" style="margin:18px 0 8px">How the room guessed</div>
+        ${dist}
       </div>`;
 
     animateBars(els.resultsArea);
-  }
-
-  function resultRow(r, leaderId, myVoteId) {
-    const isLeader = leaderId === r.optionId;
-    return `
-      <div class="result-row ${isLeader ? 'is-leader' : ''}">
-        <div class="result-top">
-          <span class="result-label">${r.emoji ? escapeHtml(r.emoji) + ' ' : ''}${escapeHtml(r.label)}
-            ${myVoteId === r.optionId ? '<span class="pill pill-gold" style="margin-left:6px">YOUR VOTE</span>' : ''}</span>
-          <span class="result-votes">${r.votes}</span>
-          <span class="result-pct">${r.percent}%</span>
-        </div>
-        <div class="bar-track"><div class="bar-fill" data-w="${r.percent}"></div></div>
-      </div>`;
   }
 
   function renderHistory() {
@@ -685,16 +491,16 @@
           <div class="accordion" data-history="${h.id}">
             <button class="accordion-head" type="button">
               <span class="accordion-q">${escapeHtml(h.question)}</span>
-              <span class="pill pill-ghost">${h.totalVotes}</span>
+              <span class="pill pill-ghost">${h.totalVotes} 🎯</span>
               <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
             </button>
             <div class="accordion-body">
-              <div class="results">${
-                h.results.kind === 'bid'
-                  ? window.App.bidResultRows(h.results)
-                  : h.results.rows.map((r) => resultRow(r, h.results.leadingOptionId, h.viewer?.votedOptionId ?? null)).join('')
-              }</div>
-              <p class="mute-sm" style="margin-top:8px">${h.totalVotes} votes · closed ${window.App.timeAgo(h.closedAt)}</p>
+              <div class="results">${window.App.bidResultRows(h.results)}</div>
+              <p class="mute-sm" style="margin-top:8px">${h.totalVotes} ${window.App.plural(
+                h.totalVotes,
+                'guess',
+                'guesses'
+              )} · closed ${window.App.timeAgo(h.closedAt)}</p>
             </div>
           </div>`).join('')}
       </div>`;

@@ -129,51 +129,8 @@
     hintEl.textContent = 'Voting paused';
   }
 
-  function winnerHtml(p) {
-    const results = p.results;
-    if (!results || !results.leadingOptionId) {
-      return `
-        <div class="dp-winner">
-          <div class="trophy">🏏</div>
-          <div class="win-label">Poll closed</div>
-          <div class="win-name">It's a tie!</div>
-          <p class="muted">${p.totalVotes} votes counted</p>
-        </div>`;
-    }
-    const row = results.rows.find((r) => r.optionId === results.leadingOptionId);
-    return `
-      <div class="dp-winner">
-        <div class="trophy">🏆</div>
-        <div class="win-label">Audience winner</div>
-        <div class="win-name">${row.emoji ? escapeHtml(row.emoji) + ' ' : ''}${escapeHtml(row.label)}</div>
-        <p class="muted" style="font-size:clamp(13px,1.2vw,20px)">${row.percent}% · ${row.votes} of ${p.totalVotes} votes</p>
-      </div>`;
-  }
-
   function renderClosed(p) {
-    if (p.pollType === 'bid') return renderBid(p, { closed: true });
-    const showResults = p.resultsVisible && p.results;
-    mainEl.className = 'dp-main split';
-    mainEl.innerHTML = `
-      <div class="fade-up">
-        ${showResults ? winnerHtml(p) : `<div class="dp-winner"><div class="trophy">🔒</div><div class="win-label">Poll closed</div><div class="win-name">Results private</div></div>`}
-        <div class="dp-question dp-question-sm" style="margin-top:clamp(10px,1.4vw,24px);max-width:34ch">${escapeHtml(p.question)}</div>
-      </div>
-      ${showResults ? `<div class="dp-results">${p.results.rows
-        .map(
-          (r) => `
-        <div class="dp-result ${p.results.leadingOptionId === r.optionId ? 'is-leader' : ''}">
-          <div class="dp-result-top">
-            <span class="dp-result-label">${r.emoji ? escapeHtml(r.emoji) + ' ' : ''}${escapeHtml(r.label)}</span>
-            <span class="dp-result-votes">${r.votes}</span>
-            <span class="dp-result-pct">${r.percent}%</span>
-          </div>
-          <div class="dp-bar"><div class="dp-bar-fill" data-w="${r.percent}"></div></div>
-        </div>`
-        )
-        .join('')}</div>` : ''}`;
-    animBars();
-    hintEl.textContent = `Poll closed · ${p.totalVotes} votes`;
+    return renderBid(p, { closed: true });
   }
 
   /* 🎯 Bid round: big player name + guesses so far, then the winners podium. */
@@ -243,66 +200,7 @@
   }
 
   function renderActive(p) {
-    if (p.pollType === 'bid') return renderBid(p);
-    const showResults = p.resultsVisible && p.results;
-    mainEl.className = 'dp-main split';
-    const hasTimer = !!p.endsAt;
-    const totalParticipants = Math.max(state.stats.participants, p.totalVotes);
-    const turnout = totalParticipants ? Math.min(100, (p.totalVotes / totalParticipants) * 100) : 0;
-    mainEl.innerHTML = `
-      <div class="fade-up">
-        <div class="dp-row" style="margin-bottom:clamp(8px,1vw,18px)">
-          <span class="pill pill-live" style="font-size:clamp(10px,.9vw,15px);padding:6px 14px"><span class="dot"></span>LIVE POLL</span>
-          ${p.category ? `<span class="pill pill-ghost" style="font-size:clamp(10px,.9vw,15px);padding:6px 14px">${escapeHtml(p.category)}</span>` : ''}
-          <span class="pill pill-ghost" style="font-size:clamp(10px,.9vw,15px);padding:6px 14px">${p.totalVotes} votes</span>
-        </div>
-        <h1 class="dp-question">${escapeHtml(p.question)}</h1>
-        <div class="dp-row" style="margin-top:clamp(14px,1.8vw,30px)">
-          <div class="dp-timer ${hasTimer ? '' : 'hidden'}" id="dp-timer">
-            <div class="dp-ring" id="dp-ring" style="--pct:100"></div>
-            <span id="dp-timer-text">--:--</span>
-          </div>
-          <div class="dp-hint" style="text-align:left;margin-left:0;letter-spacing:0">
-            Vote on your phone now${p.anonymous ? ' · anonymous' : ''}
-          </div>
-        </div>
-      </div>
-      ${
-        showResults
-          ? `<div class="dp-results">${p.results.rows
-              .map(
-                (r) => `
-            <div class="dp-result ${p.results.leadingOptionId === r.optionId ? 'is-leader' : ''}">
-              <div class="dp-result-top">
-                <span class="dp-result-label">${r.emoji ? escapeHtml(r.emoji) + ' ' : ''}${escapeHtml(r.label)}</span>
-                <span class="dp-result-votes">${r.votes}</span>
-                <span class="dp-result-pct">${r.percent}%</span>
-              </div>
-              <div class="dp-bar"><div class="dp-bar-fill" data-w="${r.percent}"></div></div>
-            </div>`
-              )
-              .join('')}</div>`
-          : `<div class="dp-panel dp-open">
-               <div class="dp-open-icon">🗳️</div>
-               <div class="dp-open-title">Voting is open</div>
-               <p class="muted" style="font-size:clamp(12px,1.05vw,18px);max-width:34ch">
-                 Open the link at the bottom on your phone, pick your answer and watch the big screen.
-                 ${p.anonymous ? 'Votes are anonymous.' : 'One vote per person.'}
-               </p>
-               <div class="dp-progress">
-                 <div class="dp-progress-top">
-                   <span>${p.totalVotes} votes in</span>
-                   <span>${Math.round(turnout)}% turnout</span>
-                 </div>
-                 <div class="dp-progress-bar"><div class="dp-progress-fill" id="dp-turnout" data-w="${turnout.toFixed(1)}"></div></div>
-               </div>
-               <div class="row" style="justify-content:center;gap:10px;flex-wrap:wrap">
-                 <span class="pill pill-gold">Results revealed by the host</span>
-               </div>
-             </div>`
-      }`;
-    animBars();
-    hintEl.textContent = showResults ? 'Live results' : 'Results hidden until reveal';
+    return renderBid(p);
   }
 
   function tick() {

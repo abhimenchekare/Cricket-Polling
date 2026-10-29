@@ -7,8 +7,8 @@
 <meta name="robots" content="noindex" />
 <title>Manage Polls · Admin</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏏</text></svg>" />
-<link rel="stylesheet" href="/css/theme.css?v=2.4.0" />
-<link rel="stylesheet" href="/css/admin.css?v=2.4.0" />
+<link rel="stylesheet" href="/css/theme.css?v=3.0.0" />
+<link rel="stylesheet" href="/css/admin.css?v=3.0.0" />
 </head>
 <body class="admin-body">
 <div class="admin">
@@ -59,52 +59,31 @@
           <div class="editor-grid">
             <div>
               <div class="form-section">
-                <span class="label">Poll type</span>
-                <div class="segmented" id="type-seg" style="margin-bottom:12px">
-                  <button type="button" data-type="choice" class="active">Multiple choice</button>
-                  <button type="button" data-type="bid">🎯 Bid range</button>
-                </div>
-
-                <div id="bid-fields" class="hidden">
-                  <label class="field">
-                    <span class="label">Player name *</span>
-                    <input class="input" id="f-player" maxlength="80" placeholder="e.g. Rohit Sharma" />
-                  </label>
-                  <p class="hint">
-                    Participants drag a price bar from <strong>20 L</strong> to <strong>30.00 Cr</strong>
-                    (same ladder as the auction board). After the bidding ends you enter the sold price and the
-                    three closest guesses win.
-                  </p>
-                  <label class="field" style="display:block;margin-top:12px">
-                    <span class="label">Question</span>
-                    <input class="input" id="f-question-bid" maxlength="200" placeholder="What will be the bid range for  player?" />
-                  </label>
-                  <p class="hint">Leave empty to use “What will be the bid range for &lt;player&gt; player?”</p>
-                </div>
+                <label class="field">
+                  <span class="label">Player name *</span>
+                  <input class="input" id="f-player" maxlength="80" placeholder="e.g. Rohit Sharma" />
+                </label>
+                <p class="hint">
+                  Participants drag a price bar from <strong>20 L</strong> to <strong>30.00 Cr</strong>
+                  (same ladder as the auction board). When the bidding ends you enter the sold price and
+                  the three closest guesses win.
+                </p>
+                <label class="field" style="display:block;margin-top:12px">
+                  <span class="label">Question</span>
+                  <input class="input" id="f-question" maxlength="200" placeholder="What will be the bid range for  player?" />
+                </label>
+                <p class="hint">Leave empty to use “What will be the bid range for &lt;player&gt; player?”</p>
               </div>
 
-              <div class="form-section" id="choice-question-section">
+              <div class="form-section" style="margin-top:12px">
                 <label class="field">
-                  <span class="label">Question *</span>
-                  <input class="input" id="f-question" maxlength="200" placeholder="Who will be the most expensive player?" required />
-                </label>
-                <label class="field" style="display:block;margin-top:12px">
                   <span class="label">Short description (optional)</span>
                   <textarea class="textarea" id="f-description" maxlength="400" placeholder="A line of context shown under the question"></textarea>
                 </label>
                 <label class="field" style="display:block;margin-top:12px">
                   <span class="label">Category label (optional)</span>
-                  <input class="input" id="f-category" maxlength="60" placeholder="Auction Predictions / Team Battle / Fun Poll" />
+                  <input class="input" id="f-category" maxlength="60" placeholder="Bid range" value="Bid range" />
                 </label>
-              </div>
-
-              <div class="form-section" id="options-section" style="margin-top:12px">
-                <div class="row-between" style="margin-bottom:10px">
-                  <span class="label" style="margin:0">Answer options *</span>
-                  <span class="mute-sm"><span id="opt-count">2</span> / 10 options</span>
-                </div>
-                <div class="option-editor" id="option-editor"></div>
-                <button type="button" class="btn btn-ghost btn-sm btn-block" id="add-option" style="margin-top:10px">+ Add option</button>
               </div>
             </div>
 
@@ -138,7 +117,7 @@
                   <button type="button" data-vis="after" class="active">After close</button>
                   <button type="button" data-vis="never">Private</button>
                 </div>
-                <p class="hint" id="vis-hint">Participants see results only once the poll closes.</p>
+                <p class="hint" id="vis-hint">Winners are hidden until you close the round or enter the sold price.</p>
               </div>
 
               <div class="form-section" style="margin-top:12px">
@@ -185,9 +164,10 @@
   </div>
 </div>
 
-<script src="/js/app.js?v=2.4.0"></script>
-<script src="/js/admin-shell.js?v=2.4.0"></script>
-<script src="/js/admin-poll-ui.js?v=2.4.0"></script>
-<script src="/js/admin-polls.js?v=2.4.0"></script>
+<script src="/js/app.js?v=3.0.0"></script>
+<script src="/js/guess-sheet.js?v=3.0.0"></script>
+<script src="/js/admin-shell.js?v=3.0.0"></script>
+<script src="/js/admin-poll-ui.js?v=3.0.0"></script>
+<script src="/js/admin-polls.js?v=3.0.0"></script>
 </body>
 </html>

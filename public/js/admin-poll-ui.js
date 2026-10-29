@@ -1,7 +1,7 @@
 /* Shared admin poll controls (used by dashboard and polls pages) */
 (function () {
   'use strict';
-  const { API, toast, confirmDialog, escapeHtml, statusPill, formatClock, formatDate, setBusy } = window.App;
+  const { API, toast, confirmDialog, escapeHtml, statusPill, formatClock, formatDate, plural } = window.App;
 
   function visibilityLabel(mode) {
     return mode === 'during' ? 'Live during voting' : mode === 'after' ? 'After closing' : 'Never (private)';
@@ -11,7 +11,7 @@
     const b = [];
     const st = poll.status;
     if (st === 'draft') {
-      b.push(`<button class="btn btn-primary" data-poll-act="start" data-id="${poll.id}">▶ Start poll</button>`);
+      b.push(`<button class="btn btn-primary" data-poll-act="start" data-id="${poll.id}">▶ Start round</button>`);
     }
     if (st === 'active') {
       b.push(`<button class="btn btn-gold" data-poll-act="pause" data-id="${poll.id}">⏸ Pause</button>`);
@@ -24,6 +24,7 @@
     }
     if (st === 'closed') {
       b.push(`<button class="btn btn-primary" data-poll-act="reopen" data-id="${poll.id}">↻ Reopen</button>`);
+      b.push(`<button class="btn btn-ghost" data-poll-act="guesses" data-id="${poll.id}">👥 Guesses</button>`);
     }
     b.push(`<button class="btn btn-ghost" data-poll-act="reset" data-id="${poll.id}">⟲ Reset votes</button>`);
     b.push(`<button class="btn btn-ghost" data-poll-act="edit" data-id="${poll.id}">✏️ Edit</button>`);
@@ -88,6 +89,9 @@
         if (!ok) return;
         await API.del(`/api/admin/polls/${id}`);
         toast('Poll deleted', 'ok');
+      } else if (act === 'guesses') {
+        if (window.PollGuessSheet) window.PollGuessSheet.open(Number(id));
+        return;
       } else if (act === 'export') {
         window.location.href = `/api/admin/export/poll/${id}.csv`;
         return;
@@ -108,17 +112,23 @@
     }
   }
 
-  function resultsHtml(results, { max = 8 } = {}) {
-    // Bid rounds rank guesses instead of options, so they get their own compact view.
-    if (results && results.kind === 'bid') {
-      if (!results.actualLakh) {
-        return `<div class="empty">${results.totalGuesses || 0} guesses — enter the sold price to rank them</div>`;
-      }
-      if (!results.winners.length) return '<div class="empty">Sold price entered, but nobody guessed</div>';
-      const medal = ['🥇', '🥈', '🥉'];
-      return results.winners
-        .map(
-          (w) => `
+  /** Winners of a bid round (slider-only app: this is the only result shape there is). */
+  function resultsHtml(results) {
+    if (!results || !results.kind) return '<div class="empty">No guesses yet</div>';
+    if (results.actualLakh == null) {
+      return `<div class="empty">${results.totalGuesses || 0} ${plural(
+        results.totalGuesses || 0,
+        'guess',
+        'guesses'
+      )} — enter the sold price to rank them</div>`;
+    }
+    if (!results.winners || !results.winners.length) {
+      return '<div class="empty">Sold price entered, but nobody guessed</div>';
+    }
+    const medal = ['🥇', '🥈', '🥉'];
+    return results.winners
+      .map(
+        (w) => `
         <div class="result-row ${w.rank === 1 ? 'is-leader' : ''}">
           <div class="result-top">
             <span class="result-label">${medal[w.rank - 1] || '#' + w.rank} ${escapeHtml(w.name)}</span>
@@ -127,22 +137,6 @@
           </div>
           <div class="bar-track"><div class="bar-fill" data-w="${w.rank === 1 ? 100 : w.rank === 2 ? 70 : 45}"></div></div>
         </div>`
-        )
-        .join('');
-    }
-    if (!results || !results.rows || !results.rows.length) return '<div class="empty">No votes yet</div>';
-    return results.rows
-      .slice(0, max)
-      .map(
-        (r) => `
-      <div class="result-row ${results.leadingOptionId === r.optionId ? 'is-leader' : ''}">
-        <div class="result-top">
-          <span class="result-label">${r.emoji ? escapeHtml(r.emoji) + ' ' : ''}${escapeHtml(r.label)}</span>
-          <span class="result-votes">${r.votes}</span>
-          <span class="result-pct">${r.percent}%</span>
-        </div>
-        <div class="bar-track"><div class="bar-fill" data-w="${r.percent}"></div></div>
-      </div>`
       )
       .join('');
   }
@@ -171,23 +165,13 @@
   }
 
   function metaChips(poll) {
-    if (poll.pollType === 'bid') {
-      return `
-        ${statusPill(poll.status)}
-        <span class="pill pill-gold">🎯 BID RANGE</span>
-        <span class="pill pill-ghost">${poll.totalVotes} guesses</span>
-        <span class="pill pill-ghost">⏱ ${poll.timerSeconds ? poll.timerSeconds + 's' : 'No timer'}</span>
-        ${poll.actualLakh ? `<span class="pill pill-ghost">💰 sold ${escapeHtml(poll.actualLabel || '')}</span>` : ''}
-        ${poll.playerName ? `<span class="pill pill-ghost">👤 ${escapeHtml(poll.playerName)}</span>` : ''}
-      `;
-    }
     return `
       ${statusPill(poll.status)}
-      <span class="pill pill-ghost">🗳️ ${poll.totalVotes} votes</span>
+      <span class="pill pill-gold">🎯 BID RANGE</span>
+      <span class="pill pill-ghost">${poll.totalVotes} ${plural(poll.totalVotes, 'guess', 'guesses')}</span>
       <span class="pill pill-ghost">⏱ ${poll.timerSeconds ? poll.timerSeconds + 's' : 'No timer'}</span>
-      <span class="pill pill-ghost">${poll.anonymous ? '🕶️ Anonymous' : '👤 Named'}</span>
-      <span class="pill pill-ghost">👁 ${visibilityLabel(poll.showResults)}</span>
-      ${poll.category ? `<span class="pill pill-ghost">${escapeHtml(poll.category)}</span>` : ''}
+      ${poll.actualLakh ? `<span class="pill pill-ghost">💰 sold ${escapeHtml(poll.actualLabel || '')}</span>` : ''}
+      ${poll.playerName ? `<span class="pill pill-ghost">👤 ${escapeHtml(poll.playerName)}</span>` : ''}
     `;
   }
 

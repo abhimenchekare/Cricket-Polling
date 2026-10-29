@@ -40,11 +40,7 @@
 
     listEl.innerHTML = polls
       .map((p) => {
-        const winner = p.results?.leadingOptionId
-          ? (p.results.kind === 'bid'
-              ? (p.results.winners && p.results.winners[0]) || null
-              : p.results.rows.find((r) => r.optionId === p.results.leadingOptionId))
-          : null;
+        const winner = p.results && p.results.winners ? p.results.winners[0] || null : null;
         return `
         <div class="card" style="margin-bottom:12px">
           <div class="card-head">
@@ -57,11 +53,16 @@
           <div class="poll-item-meta">${UI.metaChips(p)}</div>
           ${
             winner
-              ? `<div class="banner banner-ok" style="margin:10px 0">🏆 Winner: <strong>${escapeHtml(winner.label)}</strong> · ${winner.percent}% (${winner.votes} votes)</div>`
+              ? `<div class="banner banner-ok" style="margin:10px 0">🏆 Winner: <strong>${escapeHtml(
+                  winner.name
+                )}</strong> · guessed ${escapeHtml(winner.guessLabel)} · ${escapeHtml(
+                  winner.diffLabel
+                )} ${escapeHtml(winner.direction)}</div>`
               : ''
           }
           <div class="results">${UI.resultsHtml(p.results, { max: 10 })}</div>
           <div class="poll-actions" style="margin-top:14px">
+            <button class="btn btn-ghost btn-sm" data-id="${p.id}" data-poll-act="guesses">👥 All guesses</button>
             <button class="btn btn-ghost btn-sm" data-id="${p.id}" data-poll-act="export">⬇ Export CSV</button>
             ${p.status === 'closed' ? `<button class="btn btn-ghost btn-sm" data-id="${p.id}" data-poll-act="reopen">↻ Reopen</button>` : ''}
             ${p.status === 'draft' ? `<button class="btn btn-primary btn-sm" data-id="${p.id}" data-poll-act="start">▶ Start</button>` : ''}
