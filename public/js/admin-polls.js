@@ -16,6 +16,37 @@
   const timerInput = document.getElementById('f-timer');
   const anonInput = document.getElementById('f-anon');
   const qInput = document.getElementById('f-question');
+  const qInputBid = document.getElementById('f-question-bid');
+  const playerInput = document.getElementById('f-player');
+  let pollType = 'choice';
+
+  function setPollType(type, { keepFields = false } = {}) {
+    pollType = type === 'bid' ? 'bid' : 'choice';
+    document.querySelectorAll('#type-seg button').forEach((b) => {
+      b.classList.toggle('active', b.dataset.type === pollType);
+    });
+    document.getElementById('bid-fields').classList.toggle('hidden', pollType !== 'bid');
+    document.getElementById('choice-question-section').classList.toggle('hidden', pollType === 'bid');
+    document.getElementById('options-section').classList.toggle('hidden', pollType === 'bid');
+    const vis = document.getElementById('vis-section');
+    if (vis) {
+      vis.style.opacity = pollType === 'bid' ? '0.5' : '1';
+      vis.querySelector('.hint, p.hint')?.classList.toggle('hidden', pollType === 'bid');
+    }
+    if (!keepFields) {
+      // sensible default countdown for a bid round
+      if (pollType === 'bid' && (!timerInput.value || Number(timerInput.value) === 30)) {
+        timerInput.value = 20;
+        markTimerPreset();
+      }
+    }
+  }
+
+  document.getElementById('type-seg').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-type]');
+    if (!btn) return;
+    setPollType(btn.dataset.type);
+  });
   const dInput = document.getElementById('f-description');
   const cInput = document.getElementById('f-category');
 
@@ -117,7 +148,10 @@
     visibility = poll ? poll.showResults : 'after';
     document.querySelectorAll('#vis-seg button').forEach((b) => b.classList.toggle('active', b.dataset.vis === visibility));
     document.getElementById('vis-hint').textContent = visHints[visibility];
-    setOptions(poll ? poll.options : null);
+    setOptions(poll && poll.pollType !== 'bid' ? poll.options : null);
+    setPollType(poll && poll.pollType === 'bid' ? 'bid' : 'choice', { keepFields: true });
+    playerInput.value = poll && poll.playerName ? poll.playerName : '';
+    qInputBid.value = poll && poll.pollType === 'bid' ? poll.question || '' : '';
     showError('');
     editorCard.classList.remove('hidden');
     editorCard.classList.add('fade-up');
@@ -144,22 +178,33 @@
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     showError('');
-    const question = qInput.value.trim();
+    const isBid = pollType === 'bid';
+    const question = (isBid ? qInputBid.value.trim() : qInput.value.trim());
+    const playerName = playerInput.value.trim();
     const options = Array.from(optionEditor.children).map((row) => ({
       emoji: row.querySelector('.emoji-input').value.trim(),
       label: row.querySelectorAll('.input')[1].value.trim()
     })).filter((o) => o.label);
-    if (question.length < 5) return showError('Please write a question (at least 5 characters)');
-    if (options.length < 2) return showError('Add at least 2 answer options');
+
+    if (isBid) {
+      if (!playerName) return showError('Enter the player name for this bid round');
+    } else {
+      if (question.length < 5) return showError('Please write a question (at least 5 characters)');
+      if (options.length < 2) return showError('Add at least 2 answer options');
+    }
 
     const payload = {
-      question,
+      pollType: isBid ? 'bid' : 'choice',
+      playerName: isBid ? playerName : null,
+      question: isBid
+        ? question || `What will be the bid range for ${playerName} player?`
+        : question,
       description: dInput.value.trim(),
-      category: cInput.value.trim(),
+      category: cInput.value.trim() || (isBid ? 'Bid range' : ''),
       timerSeconds: Number(timerInput.value) || 0,
       showResults: visibility,
       anonymous: anonInput.checked,
-      options
+      options: isBid ? [] : options
     };
 
     const btn = submitMode === 'start' ? document.getElementById('save-start') : document.getElementById('save-draft');
@@ -231,17 +276,31 @@
           <span class="pill pill-ghost">${timeAgo(p.createdAt)}</span>
         </div>
         ${
-          p.totalVotes
-            ? `<div class="admin-mini-results">${p.results.rows
-                .slice(0, 5)
-                .map(
-                  (r) => `<div class="mini-row">
+          p.totalVotes || (p.pollType === 'bid' && p.actualLakh)
+            ? `<div class="admin-mini-results">${
+                p.results.kind === 'bid'
+                  ? p.results.actualLakh
+                    ? p.results.winners
+                        .map(
+                          (w) => `<div class="mini-row">
+                            <span class="mini-label">${['🥇', '🥈', '🥉'][w.rank - 1] || '#' + w.rank} ${escapeHtml(w.name)}</span>
+                            <span class="mini-pct">${escapeHtml(w.guessLabel)}</span>
+                            <span class="mute-sm">${escapeHtml(w.diffLabel)}</span>
+                          </div>`
+                        )
+                        .join('')
+                    : `<div class="mini-row"><span class="mini-label">${p.results.totalGuesses} guesses · sold price not entered</span></div>`
+                  : p.results.rows
+                      .slice(0, 5)
+                      .map(
+                        (r) => `<div class="mini-row">
                     <span class="mini-label">${r.emoji ? escapeHtml(r.emoji) + ' ' : ''}${escapeHtml(r.label)}</span>
                     <span class="mini-pct">${r.percent}%</span>
                     <span class="mute-sm">${r.votes}</span>
                   </div>`
-                )
-                .join('')}</div>`
+                      )
+                      .join('')
+              }</div>`
             : ''
         }
         <div class="poll-actions" style="margin-top:14px">${UI.controlButtons(p)}</div>

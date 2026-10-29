@@ -2,6 +2,7 @@
 
 const { q, one, scalar, logActivity } = require('./db');
 const { allSettings } = require('./settings');
+const ladder = require('./bidladder');
 
 /* ------------------------------------------------------------------ */
 /* Poll queries                                                       */
@@ -62,6 +63,114 @@ async function getResults(pollId) {
   return { totalVotes: total, rows, leadingOptionId };
 }
 
+/* ------------------------------------------------------------------ */
+/* Bid-range polls                                                    */
+/* ------------------------------------------------------------------ */
+
+/** Every guess with the participant behind it, ordered nearest-first (ties: earliest). */
+async function getBidGuesses(pollId) {
+  return q(
+    `SELECT v.id, v.guess_lakh, v.created_at, p.id AS participant_id, p.name, p.employee_id
+       FROM votes v
+       JOIN participants p ON p.id = v.participant_id
+      WHERE v.poll_id = $1 AND v.guess_lakh IS NOT NULL
+      ORDER BY v.created_at ASC, v.id ASC`,
+    [pollId]
+  );
+}
+
+/**
+ * Rank everyone against the price the player actually sold for.
+ *   - closest guess wins; ties (same distance) go to whoever locked it in first
+ *   - only the top 3 are winners, but every guesser gets their own rank + distance
+ */
+function rankBidGuesses(guesses, actualLakh) {
+  const actual = Number(actualLakh);
+  const ranked = guesses.map((g) => {
+    const guess = Number(g.guess_lakh);
+    return {
+      participantId: g.participant_id,
+      name: g.name,
+      employeeId: g.employee_id,
+      guessLakh: guess,
+      guessLabel: ladder.label(guess),
+      diffLakh: Math.abs(guess - actual),
+      diffLabel: ladder.label(Math.abs(guess - actual)),
+      direction: guess === actual ? 'exact' : guess > actual ? 'over' : 'under',
+      at: Number(g.created_at)
+    };
+  });
+  ranked.sort((a, b) => a.diffLakh - b.diffLakh || a.at - b.at || a.participantId - b.participantId);
+
+  // Ordinal ranking: the host always declares exactly three winners, so equal distances are
+  // separated by who locked their guess in first (the sort above) rather than sharing a rank.
+  ranked.forEach((row, i) => {
+    row.rank = i + 1;
+    row.tiedOnDistance = ranked.some((o) => o !== row && o.diffLakh === row.diffLakh);
+  });
+  return ranked;
+}
+
+/** Distribution of guesses across the ladder (only values somebody picked). */
+function buildBidDistribution(guesses, actualLakh) {
+  const buckets = new Map();
+  for (const g of guesses) {
+    const v = Number(g.guess_lakh);
+    buckets.set(v, (buckets.get(v) || 0) + 1);
+  }
+  const total = guesses.length;
+  return [...buckets.entries()]
+    .map(([lakh, count]) => ({
+      lakh,
+      label: ladder.label(lakh),
+      count,
+      percent: total ? Math.round((count / total) * 1000) / 10 : 0,
+      isActual: actualLakh != null && Number(actualLakh) === lakh
+    }))
+    .sort((a, b) => a.lakh - b.lakh);
+}
+
+async function getBidResults(poll, participantId = null) {
+  const actualLakh = poll.actual_lakh == null ? null : Number(poll.actual_lakh);
+  const guesses = await getBidGuesses(poll.id);
+  const ranked = actualLakh == null ? [] : rankBidGuesses(guesses, actualLakh);
+  const winners = ranked.filter((r) => r.rank <= 3).slice(0, 3);
+
+  let viewer = null;
+  if (participantId) {
+    const me = ranked.find((r) => r.participantId === Number(participantId));
+    if (me) {
+      viewer = {
+        guessLakh: me.guessLakh,
+        guessLabel: me.guessLabel,
+        diffLakh: me.diffLakh,
+        diffLabel: me.diffLabel,
+        direction: me.direction,
+        rank: me.rank,
+        isWinner: me.rank <= 3
+      };
+    }
+  }
+
+  return {
+    kind: 'bid',
+    actualLakh,
+    actualLabel: actualLakh == null ? null : ladder.label(actualLakh),
+    totalGuesses: guesses.length,
+    winners: winners.map((w) => ({
+      rank: w.rank,
+      name: w.name,
+      guessLakh: w.guessLakh,
+      guessLabel: w.guessLabel,
+      diffLakh: w.diffLakh,
+      diffLabel: w.diffLabel,
+      direction: w.direction
+    })),
+    distribution: buildBidDistribution(guesses, actualLakh),
+    viewer
+  };
+}
+
 async function getParticipantCount() {
   return Number(await scalar('SELECT COUNT(*)::int AS c FROM participants'));
 }
@@ -100,6 +209,8 @@ async function sweepExpiredPolls() {
 
 function resultsVisibleToParticipants(poll) {
   if (!poll) return false;
+  // Bid rounds reveal the moment the host enters the hammer price (that IS the result).
+  if (poll.poll_type === 'bid') return poll.actual_lakh != null;
   if (poll.show_results === 'never') return false;
   if (poll.status === 'closed') return true;
   if (poll.show_results === 'during' && (poll.status === 'active' || poll.status === 'paused')) {
@@ -110,9 +221,16 @@ function resultsVisibleToParticipants(poll) {
 
 async function serializePoll(poll, { includeResults = false, participantId = null } = {}) {
   if (!poll) return null;
-  const [options, votedOptionId] = await Promise.all([
-    getOptions(poll.id),
-    getVotedOptionId(poll.id, participantId)
+  const isBid = poll.poll_type === 'bid';
+  const [options, votedOptionId, voteRow] = await Promise.all([
+    isBid ? Promise.resolve([]) : getOptions(poll.id),
+    getVotedOptionId(poll.id, participantId),
+    participantId
+      ? one('SELECT option_id, guess_lakh FROM votes WHERE poll_id = $1 AND participant_id = $2', [
+          poll.id,
+          participantId
+        ])
+      : Promise.resolve(null)
   ]);
   const totalVotes = Number(poll.total_votes || 0);
   const endsAt = poll.ends_at ? Number(poll.ends_at) : null;
@@ -139,16 +257,31 @@ async function serializePoll(poll, { includeResults = false, participantId = nul
     revision: Number(poll.revision || 0),
     totalVotes,
     voterCount: totalVotes,
+    pollType: isBid ? 'bid' : 'choice',
+    playerName: poll.player_name || null,
+    actualLakh: poll.actual_lakh == null ? null : Number(poll.actual_lakh),
     options: options.map((o) => ({ id: o.id, label: o.label, emoji: o.emoji })),
-    viewer: { hasVoted: !!votedOptionId, votedOptionId }
+    viewer: {
+      hasVoted: isBid ? Boolean(voteRow && voteRow.guess_lakh != null) : !!votedOptionId,
+      votedOptionId,
+      guessLakh: voteRow && voteRow.guess_lakh != null ? Number(voteRow.guess_lakh) : null,
+      guessLabel: voteRow && voteRow.guess_lakh != null ? ladder.label(voteRow.guess_lakh) : null
+    }
   };
 
   if (includeResults) {
-    payload.results = await getResults(poll.id);
+    payload.results = isBid ? await getBidResults(poll, participantId) : await getResults(poll.id);
     payload.resultsVisible = true;
   } else {
     payload.results = null;
     payload.resultsVisible = false;
+    // Before the reveal, a bid poll still tells you YOUR own guess (nobody else's).
+    if (isBid && participantId && voteRow && voteRow.guess_lakh != null) {
+      payload.myGuess = {
+        lakh: Number(voteRow.guess_lakh),
+        label: ladder.label(voteRow.guess_lakh)
+      };
+    }
   }
   return payload;
 }
@@ -245,9 +378,17 @@ async function buildAdminState() {
 
   const polls = [];
   for (const p of pollRows) {
-    const [options, results] = await Promise.all([getOptions(p.id), getResults(p.id)]);
+    const isBid = p.poll_type === 'bid';
+    const [options, results] = await Promise.all([
+      isBid ? Promise.resolve([]) : getOptions(p.id),
+      isBid ? getBidResults(p) : getResults(p.id)
+    ]);
     polls.push({
       id: p.id,
+      pollType: isBid ? 'bid' : 'choice',
+      playerName: p.player_name || null,
+      actualLakh: p.actual_lakh == null ? null : Number(p.actual_lakh),
+      actualLabel: p.actual_lakh == null ? null : ladder.label(p.actual_lakh),
       question: p.question,
       description: p.description,
       category: p.category,
@@ -280,7 +421,12 @@ async function buildAdminState() {
     settings,
     // fingerprint so the admin panel can skip redundant re-renders
     version: [
-      polls.map((p) => `${p.id}.${p.status}.${p.revision || 0}.${p.totalVotes}.${p.showResults}`).join('|'),
+      polls
+        .map(
+          (p) =>
+            `${p.id}.${p.status}.${p.revision || 0}.${p.totalVotes}.${p.showResults}.${p.actualLakh ?? '-'}`
+        )
+        .join('|'),
       participants,
       online,
       polls.length
@@ -300,6 +446,9 @@ async function buildAdminState() {
 
 module.exports = {
   POLL_SELECT,
+  getBidResults,
+  getBidGuesses,
+  rankBidGuesses,
   sweepExpiredPolls,
   getPoll,
   getOptions,

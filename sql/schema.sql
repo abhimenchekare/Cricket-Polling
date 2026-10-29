@@ -90,3 +90,21 @@ CREATE INDEX IF NOT EXISTS idx_options_poll ON options(poll_id, position);
 CREATE INDEX IF NOT EXISTS idx_polls_status ON polls(status);
 CREATE INDEX IF NOT EXISTS idx_participants_seen ON participants(last_seen_at);
 CREATE INDEX IF NOT EXISTS idx_psessions_token ON participant_sessions(token);
+
+-- ---------------------------------------------------------------------------
+-- Bid-range polls ("what will this player sell for?")
+-- Amounts are stored as INTEGER LAKH (20 = 20 L, 100 = 1.00 Cr) for exact maths.
+-- These statements are idempotent so an existing database upgrades in place.
+-- ---------------------------------------------------------------------------
+ALTER TABLE polls  ADD COLUMN IF NOT EXISTS poll_type     TEXT NOT NULL DEFAULT 'choice';
+ALTER TABLE polls  ADD COLUMN IF NOT EXISTS player_name   TEXT;
+ALTER TABLE polls  ADD COLUMN IF NOT EXISTS actual_lakh   INTEGER;
+ALTER TABLE polls  ADD COLUMN IF NOT EXISTS actual_set_at BIGINT;
+ALTER TABLE polls  ADD COLUMN IF NOT EXISTS actual_set_by TEXT;
+ALTER TABLE votes  ADD COLUMN IF NOT EXISTS guess_lakh    INTEGER;
+
+-- a bid guess has no option row, so option_id must be nullable
+ALTER TABLE votes ALTER COLUMN option_id DROP NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_votes_poll_guess ON votes(poll_id, guess_lakh);
+CREATE INDEX IF NOT EXISTS idx_polls_type ON polls(poll_type);

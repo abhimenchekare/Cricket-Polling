@@ -6,6 +6,7 @@ const { allSettings, setSetting } = require('../settings');
 const auth = require('../auth');
 const state = require('../state');
 const config = require('../config');
+const ladder = require('../bidladder');
 
 const router = express.Router();
 
@@ -44,6 +45,7 @@ router.post('/login', async (req, res, next) => {
     await logActivity('admin.login', `${admin.username} signed in`, admin.username);
     res.json({
       ok: true,
+      token, // the panel stores this and sends it as x-admin-token (cookie fallback)
       admin: { id: admin.id, username: admin.username, displayName: admin.display_name }
     });
   } catch (err) {
@@ -64,6 +66,7 @@ router.post('/logout', async (req, res, next) => {
 
 router.get('/me', async (req, res) => {
   if (!req.admin) return res.status(401).json({ error: 'Not signed in' });
+  if (req.adminTokenSource === 'header') res.set('X-Admin-Auth', 'header');
   res.json({
     admin: {
       id: req.admin.id,
@@ -86,7 +89,7 @@ router.post('/password', auth.requireAdmin, async (req, res, next) => {
       maxAge: Number(process.env.ADMIN_SESSION_HOURS || 12) * 60 * 60 * 1000
     });
     await logActivity('admin.password_changed', 'Admin password updated', req.admin.username);
-    res.json({ ok: true });
+    res.json({ ok: true, token });
   } catch (err) {
     next(err);
   }
@@ -107,7 +110,9 @@ router.get('/state', async (req, res, next) => {
 /* ---------------------------- poll validation ---------------------------- */
 
 function parsePollPayload(body) {
-  const question = String(body?.question || '').trim().slice(0, 200);
+  const pollType = body?.pollType === 'bid' ? 'bid' : 'choice';
+  const playerName = String(body?.playerName || '').trim().slice(0, 80) || null;
+  let question = String(body?.question || '').trim().slice(0, 200);
   const description = String(body?.description || '').trim().slice(0, 400) || null;
   const category = String(body?.category || '').trim().slice(0, 60) || null;
   const showResults = ['never', 'during', 'after'].includes(body?.showResults)
@@ -128,11 +133,29 @@ function parsePollPayload(body) {
     .filter((o) => o.label.length > 0);
 
   const errors = [];
-  if (question.length < 5) errors.push('Question must be at least 5 characters');
-  if (options.length < 2) errors.push('Add at least 2 answer options');
-  if (options.length > 10) errors.push('A poll can have at most 10 options');
+  if (pollType === 'bid') {
+    if (!playerName) errors.push('Player name is required for a bid range poll');
+    if (!question) question = `What will be the bid range for ${playerName} player?`;
+  } else if (question.length < 5) {
+    errors.push('Question must be at least 5 characters');
+  }
+  if (pollType === 'choice') {
+    if (options.length < 2) errors.push('Add at least 2 answer options');
+    if (options.length > 10) errors.push('A poll can have at most 10 options');
+  }
 
-  return { question, description, category, showResults, anonymous, timerSeconds, options, errors };
+  return {
+    pollType,
+    playerName,
+    question,
+    description,
+    category: category || (pollType === 'bid' ? 'Bid range' : null),
+    showResults,
+    anonymous,
+    timerSeconds,
+    options: pollType === 'bid' ? [] : options,
+    errors
+  };
 }
 
 async function replaceOptions(pollId, options) {
@@ -198,8 +221,9 @@ router.post('/polls', async (req, res, next) => {
     const now = Date.now();
     const poll = await one(
       `INSERT INTO polls (question, description, category, status, show_results, anonymous,
-                          timer_seconds, remaining_ms, created_at, updated_at, created_by)
-       VALUES ($1, $2, $3, 'draft', $4, $5, $6, $7, $8, $8, $9) RETURNING *`,
+                          timer_seconds, remaining_ms, poll_type, player_name,
+                          created_at, updated_at, created_by)
+       VALUES ($1, $2, $3, 'draft', $4, $5, $6, $7, $8, $9, $10, $10, $11) RETURNING *`,
       [
         data.question,
         data.description,
@@ -208,11 +232,13 @@ router.post('/polls', async (req, res, next) => {
         data.anonymous,
         data.timerSeconds,
         data.timerSeconds * 1000,
+        data.pollType,
+        data.playerName,
         now,
         req.admin.username
       ]
     );
-    await replaceOptions(poll.id, data.options);
+    if (data.pollType !== 'bid') await replaceOptions(poll.id, data.options);
     await logActivity('poll.created', `Created poll "${data.question}"`, req.admin.username);
     const full = await state.getPoll(poll.id);
     res.status(201).json({ ok: true, poll: await state.serializePoll(full) });
@@ -232,24 +258,33 @@ router.put('/polls/:id', async (req, res, next) => {
     const voteCount = Number(
       (await one('SELECT COUNT(*)::int AS c FROM votes WHERE poll_id = $1', [poll.id])).c
     );
-    if (voteCount > 0) {
-      const current = await state.getOptions(poll.id);
-      const sameOptions =
-        current.length === data.options.length &&
-        current.every((o, i) => o.label.trim() === data.options[i].label);
-      if (!sameOptions) {
-        return res.status(409).json({
-          error:
-            'This poll already has votes, so its answer options cannot be changed. Reset the poll first.'
-        });
+    if (poll.poll_type === 'bid' && data.pollType !== 'bid' && voteCount > 0) {
+      return res.status(409).json({
+        error: 'This bid round already has guesses, so it cannot become a choice poll. Reset it first.'
+      });
+    }
+
+    if (data.pollType !== 'bid') {
+      if (voteCount > 0 && poll.poll_type !== 'bid') {
+        const current = await state.getOptions(poll.id);
+        const sameOptions =
+          current.length === data.options.length &&
+          current.every((o, i) => o.label.trim() === data.options[i].label);
+        if (!sameOptions) {
+          return res.status(409).json({
+            error:
+              'This poll already has votes, so its answer options cannot be changed. Reset the poll first.'
+          });
+        }
+      } else if (voteCount === 0) {
+        await syncOptions(poll.id, data.options);
       }
-    } else {
-      await syncOptions(poll.id, data.options);
     }
 
     await q(
       `UPDATE polls SET question = $1, description = $2, category = $3, show_results = $4,
-                        anonymous = $5, timer_seconds = $6, updated_at = $7, revision = revision + 1
+                        anonymous = $5, timer_seconds = $6, poll_type = $9, player_name = $10,
+                        updated_at = $7, revision = revision + 1
         WHERE id = $8`,
       [
         data.question,
@@ -259,12 +294,31 @@ router.put('/polls/:id', async (req, res, next) => {
         data.anonymous,
         data.timerSeconds,
         Date.now(),
-        poll.id
+        poll.id,
+        data.pollType,
+        data.playerName
       ]
     );
     await logActivity('poll.updated', `Updated poll #${poll.id}`, req.admin.username);
     const full = await state.getPoll(poll.id);
     res.json({ ok: true, poll: await state.serializePoll(full) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* Clear a wrongly entered hammer price (round stays as it is otherwise). */
+router.delete('/polls/:id/actual', async (req, res, next) => {
+  try {
+    const poll = await one('SELECT * FROM polls WHERE id = $1', [Number(req.params.id)]);
+    if (!poll) return res.status(404).json({ error: 'Poll not found' });
+    await q(
+      `UPDATE polls SET actual_lakh = NULL, actual_set_at = NULL, actual_set_by = NULL,
+                        updated_at = $1, revision = revision + 1 WHERE id = $2`,
+      [Date.now(), poll.id]
+    );
+    await logActivity('poll.actual_price_cleared', `Cleared hammer price on #${poll.id}`, req.admin.username);
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }
@@ -501,6 +555,64 @@ router.post('/polls/:id/timer', async (req, res, next) => {
 
 /* --------------------------------- votes --------------------------------- */
 
+/* --------------------- bid round: enter the hammer price -------------------- */
+
+/**
+ * The host types what the player ACTUALLY sold for. That single number is the result:
+ * it closes the round (if still open) and rankBidGuesses() names the 3 closest guesses.
+ * Can be called again to correct a typo — everything is recomputed on read.
+ */
+router.post('/polls/:id/actual', async (req, res, next) => {
+  try {
+    const poll = await one('SELECT * FROM polls WHERE id = $1', [Number(req.params.id)]);
+    if (!poll) return res.status(404).json({ error: 'Poll not found' });
+    if (poll.poll_type !== 'bid') {
+      return res.status(400).json({ error: 'This poll is not a bid range poll' });
+    }
+
+    // The sold price is whatever the auction ended at — 1.10 Cr is a real result and is NOT on
+    // the guess ladder, so accept any whole-lakh value (the ladder only constrains guesses).
+    const raw = Number(req.body?.lakh);
+    if (!Number.isFinite(raw) || raw <= 0) {
+      return res.status(400).json({ error: 'Enter the price the player actually sold for' });
+    }
+    const lakhValue = Math.round(raw);
+    if (lakhValue > 10000) {
+      return res.status(400).json({ error: 'That price looks too high (max 100 Cr)' });
+    }
+
+    const now = Date.now();
+    await q(
+      `UPDATE polls
+          SET actual_lakh = $1, actual_set_at = $2, actual_set_by = $3,
+              status = CASE WHEN status IN ('active','paused') THEN 'closed' ELSE status END,
+              closed_at = CASE WHEN status IN ('active','paused') THEN $2 ELSE closed_at END,
+              ends_at = CASE WHEN status IN ('active','paused') THEN NULL ELSE ends_at END,
+              updated_at = $2, revision = revision + 1
+        WHERE id = $4`,
+      [lakhValue, now, req.admin.username, poll.id]
+    );
+
+    await logActivity(
+      'poll.actual_price',
+      `${poll.player_name || poll.question} sold for ${ladder.label(lakhValue)}`,
+      req.admin.username
+    );
+
+    const fresh = await state.getPoll(poll.id);
+    const results = await state.getBidResults(fresh);
+    res.json({
+      ok: true,
+      actualLakh: lakhValue,
+      actualLabel: ladder.label(lakhValue),
+      winners: results.winners,
+      totalGuesses: results.totalGuesses
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/polls/:id/votes', async (req, res, next) => {
   try {
     const poll = await one('SELECT * FROM polls WHERE id = $1', [Number(req.params.id)]);
@@ -703,6 +815,43 @@ router.get('/export/poll/:id.csv', async (req, res, next) => {
     const poll = await one('SELECT * FROM polls WHERE id = $1', [Number(req.params.id)]);
     if (!poll) return res.status(404).json({ error: 'Poll not found' });
     const settings = await allSettings();
+
+    /* Bid round: export the guesses, the hammer price and the ranked winners. */
+    if (poll.poll_type === 'bid') {
+      const bidResults = await state.getBidResults(poll);
+      const guesses = await state.getBidGuesses(poll.id);
+      const ranked = poll.actual_lakh == null ? [] : state.rankBidGuesses(guesses, poll.actual_lakh);
+      const rows = [
+        ['Bid Range Round'],
+        ['Event', settings.event_name],
+        ['Player', poll.player_name || ''],
+        ['Question', poll.question],
+        ['Status', poll.status],
+        ['Sold for', bidResults.actualLabel || 'not entered yet'],
+        ['Total guesses', bidResults.totalGuesses],
+        ['Exported at', new Date().toISOString()],
+        [],
+        ['Rank', 'Winner', 'Participant', 'Employee ID', 'Guess', 'Difference', 'Direction', 'Submitted at']
+      ];
+      for (const g of ranked) {
+        rows.push([
+          g.rank,
+          g.rank <= 3 ? 'YES' : '',
+          g.name,
+          g.employeeId,
+          g.guessLabel,
+          g.diffLabel,
+          g.direction,
+          new Date(g.at).toISOString()
+        ]);
+      }
+      rows.push([], ['Guess distribution'], ['Price', 'Guesses', 'Percent']);
+      for (const d of bidResults.distribution) {
+        rows.push([d.label, d.count, `${d.percent}%`]);
+      }
+      return csvResponse(res, `bid-${poll.id}-results.csv`, rows);
+    }
+
     const results = await state.getResults(poll.id);
 
     const rows = [

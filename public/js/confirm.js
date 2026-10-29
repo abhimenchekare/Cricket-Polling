@@ -31,9 +31,11 @@
     }
     if (!poll) return renderEmpty();
 
+    const isBid = poll.pollType === 'bid';
     const votedId = poll.viewer?.votedOptionId ?? null;
     const option = (poll.options || []).find((o) => o.id === votedId);
-    if (!votedId) {
+    const guessLakh = poll.viewer?.guessLakh ?? (poll.myGuess ? poll.myGuess.lakh : null);
+    if (!votedId && !(isBid && guessLakh != null)) {
       contentEl.innerHTML = `
         <div class="waiting-icon">⏳</div>
         <h1 class="confirm-title">No vote found</h1>
@@ -45,13 +47,32 @@
       return;
     }
 
-    choiceEl.innerHTML = `
-      <div style="margin-top:14px" class="mute-sm">Your answer</div>
-      <div class="choice-chip pop">
-        <span>${escapeHtml(option?.emoji || '✅')}</span>
-        <span>${escapeHtml(option?.label || 'Recorded')}</span>
-      </div>
-      <p class="muted" style="margin-top:14px;font-size:13.5px">“${escapeHtml(poll.question)}”</p>`;
+    if (isBid) {
+      // wording: a bid round is a guess, not a vote
+      const titleEl = document.querySelector('.confirm-title');
+      if (titleEl) titleEl.textContent = 'Guess locked in!';
+      const subEl = document.querySelector('.confirm-title + p');
+      if (subEl) subEl.textContent = 'Closest guess to the sold price wins. Sit tight.';
+      const statsLabel = document.querySelector('.stat-label');
+      if (statsLabel) statsLabel.textContent = 'Guesses on this round';
+      const label =
+        poll.viewer?.guessLabel ||
+        poll.myGuess?.label ||
+        (guessLakh == null ? 'Recorded' : `${guessLakh / 100} Cr`);
+      choiceEl.innerHTML = `
+        <div style="margin-top:14px" class="mute-sm">Your guess</div>
+        <div class="bid-locked-value pop" style="margin-top:6px">${escapeHtml(String(label))}</div>
+        ${poll.playerName ? `<div class="bid-player" style="margin-top:12px"><span class="bid-player-tag">PLAYER</span>${escapeHtml(poll.playerName)}</div>` : ''}
+        <p class="muted" style="margin-top:14px;font-size:13.5px">“${escapeHtml(poll.question)}”</p>`;
+    } else {
+      choiceEl.innerHTML = `
+        <div style="margin-top:14px" class="mute-sm">Your answer</div>
+        <div class="choice-chip pop">
+          <span>${escapeHtml(option?.emoji || '✅')}</span>
+          <span>${escapeHtml(option?.label || 'Recorded')}</span>
+        </div>
+        <p class="muted" style="margin-top:14px;font-size:13.5px">“${escapeHtml(poll.question)}”</p>`;
+    }
 
     const resultsVisible = !!poll.resultsVisible;
     statsEl.innerHTML = `

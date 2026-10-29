@@ -5,6 +5,7 @@ const { q, one } = require('../db');
 const { allSettings } = require('../settings');
 const auth = require('../auth');
 const state = require('../state');
+const ladder = require('../bidladder');
 const config = require('../config');
 
 const router = express.Router();
@@ -55,6 +56,13 @@ router.get('/meta', async (req, res, next) => {
       polling: {
         activeMs: config.pollIntervalActiveMs,
         idleMs: config.pollIntervalIdleMs
+      },
+      // One shared price ladder so phone, admin and projector always agree.
+      bid: {
+        ladder: ladder.LADDER_LAKH.map((lakh) => ({ lakh, label: ladder.label(lakh) })),
+        min: ladder.LADDER_LAKH[0],
+        max: ladder.LADDER_LAKH[ladder.LADDER_LAKH.length - 1],
+        steps: ladder.LADDER_LAKH.length
       },
       viewer: req.participant
         ? {
@@ -185,7 +193,8 @@ router.post('/vote', async (req, res, next) => {
 
     const pollId = Number(req.body?.pollId);
     const optionId = Number(req.body?.optionId);
-    if (!Number.isInteger(pollId) || !Number.isInteger(optionId)) {
+    const rawGuess = req.body?.guessLakh;
+    if (!Number.isInteger(pollId)) {
       return res.status(400).json({ error: 'Invalid vote request' });
     }
 
@@ -208,30 +217,50 @@ router.post('/vote', async (req, res, next) => {
       return res.status(409).json({ error: 'Time is up for this poll' });
     }
 
-    const option = await one('SELECT * FROM options WHERE id = $1 AND poll_id = $2', [
-      optionId,
-      pollId
-    ]);
-    if (!option) return res.status(400).json({ error: 'That option is not part of this poll' });
+    const isBid = poll.poll_type === 'bid';
+    let guessLakh = null;
+    let option = null;
+
+    if (isBid) {
+      // Bid round: the "vote" is a price from the auction ladder.
+      guessLakh = Number(rawGuess);
+      if (!ladder.isValidGuess(guessLakh)) {
+        return res.status(400).json({
+          error: 'Pick a price from the ladder (20 L up to 30.00 Cr)',
+          ladder: true
+        });
+      }
+    } else {
+      if (!Number.isInteger(optionId)) {
+        return res.status(400).json({ error: 'Invalid vote request' });
+      }
+      option = await one('SELECT * FROM options WHERE id = $1 AND poll_id = $2', [optionId, pollId]);
+      if (!option) return res.status(400).json({ error: 'That option is not part of this poll' });
+    }
 
     const already = await one(
-      'SELECT option_id FROM votes WHERE poll_id = $1 AND participant_id = $2',
+      'SELECT option_id, guess_lakh FROM votes WHERE poll_id = $1 AND participant_id = $2',
       [pollId, req.participant.id]
     );
     if (already) {
-      const chosen = await one('SELECT label FROM options WHERE id = $1', [already.option_id]);
+      const chosen = already.option_id
+        ? await one('SELECT label FROM options WHERE id = $1', [already.option_id])
+        : null;
       return res.status(409).json({
-        error: 'You have already voted in this poll',
+        error: isBid ? 'You already locked a guess for this player' : 'You have already voted in this poll',
         alreadyVoted: true,
         optionId: already.option_id,
-        optionLabel: chosen?.label || null
+        optionLabel: chosen?.label || null,
+        guessLakh: already.guess_lakh == null ? null : Number(already.guess_lakh),
+        guessLabel: already.guess_lakh == null ? null : ladder.label(already.guess_lakh)
       });
     }
 
     try {
       await q(
-        'INSERT INTO votes (poll_id, option_id, participant_id, created_at) VALUES ($1, $2, $3, $4)',
-        [pollId, optionId, req.participant.id, Date.now()]
+        'INSERT INTO votes (poll_id, option_id, participant_id, guess_lakh, created_at) VALUES ($1, $2, $3, $4, $5)',
+        // a bid guess has no option row — never pass NaN through to an INTEGER column
+        [pollId, isBid ? null : optionId, req.participant.id, guessLakh, Date.now()]
       );
     } catch (err) {
       if (err.code === '23505' || err.code === '23P01' || /duplicate key|unique/i.test(err.message)) {
@@ -252,8 +281,11 @@ router.post('/vote', async (req, res, next) => {
     res.json({
       ok: true,
       pollId,
+      pollType: isBid ? 'bid' : 'choice',
       optionId,
-      optionLabel: option.label,
+      optionLabel: isBid ? ladder.label(guessLakh) : option.label,
+      guessLakh,
+      guessLabel: isBid ? ladder.label(guessLakh) : null,
       totalVotes: total,
       question: poll.question
     });

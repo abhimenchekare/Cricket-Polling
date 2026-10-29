@@ -151,6 +151,7 @@
   }
 
   function renderClosed(p) {
+    if (p.pollType === 'bid') return renderBid(p, { closed: true });
     const showResults = p.resultsVisible && p.results;
     mainEl.className = 'dp-main split';
     mainEl.innerHTML = `
@@ -175,7 +176,74 @@
     hintEl.textContent = `Poll closed · ${p.totalVotes} votes`;
   }
 
+  /* 🎯 Bid round: big player name + guesses so far, then the winners podium. */
+  function renderBid(p, { closed = false } = {}) {
+    const showResults = p.resultsVisible && p.results && p.results.kind === 'bid';
+    mainEl.className = 'dp-main split';
+    const medal = ['🥇', '🥈', '🥉'];
+
+    const podium = showResults
+      ? `<div class="dp-results">
+           <div class="dp-bid-sold">
+             <span class="mute-sm">SOLD FOR</span>
+             <strong>${escapeHtml(p.results.actualLabel || '—')}</strong>
+           </div>
+           ${p.results.winners
+             .map(
+               (w) => `
+             <div class="dp-result is-leader dp-bid-winner">
+               <div class="dp-result-top">
+                 <span class="dp-result-label">${medal[w.rank - 1] || '#' + w.rank} ${escapeHtml(w.name)}</span>
+                 <span class="dp-result-pct">${escapeHtml(w.guessLabel)}</span>
+               </div>
+               <div class="mute-sm" style="padding:4px 2px 8px">${escapeHtml(w.diffLabel)} ${w.direction === 'exact' ? '— spot on!' : w.direction}</div>
+             </div>`
+             )
+             .join('')}
+         </div>`
+      : `<div class="dp-panel dp-open">
+           <div class="dp-open-icon">🎯</div>
+           <div class="dp-open-title">Guess the price</div>
+           <p class="muted" style="font-size:clamp(12px,1.05vw,18px);max-width:34ch">
+             Drag the price bar on your phone. ${
+               closed ? 'The host will enter the sold price in a moment.' : 'Closest guess wins.'
+             }
+           </p>
+           <div class="dp-progress">
+             <div class="dp-progress-top"><span>${p.totalVotes} ${window.App.plural(p.totalVotes, 'guess', 'guesses')}</span><span>${closed ? 'closed' : 'live'}</span></div>
+             <div class="dp-progress-bar"><div class="dp-progress-fill" data-w="${closed ? 100 : 60}"></div></div>
+           </div>
+         </div>`;
+
+    mainEl.innerHTML = `
+      <div class="fade-up">
+        <div class="dp-row" style="margin-bottom:clamp(8px,1vw,18px)">
+          <span class="pill ${closed ? 'pill-closed' : 'pill-live'}" style="font-size:clamp(10px,.9vw,15px);padding:6px 14px">
+            ${closed ? 'ROUND CLOSED' : '<span class="dot"></span>LIVE BID ROUND'}
+          </span>
+          <span class="pill pill-ghost" style="font-size:clamp(10px,.9vw,15px);padding:6px 14px">${p.totalVotes} ${window.App.plural(p.totalVotes, 'guess', 'guesses')}</span>
+        </div>
+        ${p.playerName ? `<div class="dp-bid-player">${escapeHtml(p.playerName)}</div>` : ''}
+        <h1 class="dp-question" style="margin-top:clamp(6px,1vw,14px)">${escapeHtml(p.question)}</h1>
+        ${
+          !closed
+            ? `<div class="dp-row" style="margin-top:clamp(14px,1.8vw,30px)">
+                 <div class="dp-timer ${p.endsAt ? '' : 'hidden'}" id="dp-timer">
+                   <div class="dp-ring" id="dp-ring" style="--pct:100"></div>
+                   <span id="dp-timer-text">--:--</span>
+                 </div>
+                 <div class="dp-hint" style="text-align:left;margin-left:0;letter-spacing:0">Guess on your phone now</div>
+               </div>`
+            : ''
+        }
+      </div>
+      ${podium}`;
+    animBars();
+    hintEl.textContent = showResults ? 'Winners' : closed ? 'Waiting for the sold price' : 'Bid round live';
+  }
+
   function renderActive(p) {
+    if (p.pollType === 'bid') return renderBid(p);
     const showResults = p.resultsVisible && p.results;
     mainEl.className = 'dp-main split';
     const hasTimer = !!p.endsAt;

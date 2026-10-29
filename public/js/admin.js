@@ -1,7 +1,7 @@
 /* Admin dashboard */
 (function () {
   'use strict';
-  const { API, toast, escapeHtml, confirmDialog, setBusy, formatDate, timeAgo } = window.App;
+  const { API, toast, escapeHtml, confirmDialog, setBusy, formatDate, timeAgo, haptic } = window.App;
   const UI = window.AdminPollUI;
 
   const els = {
@@ -74,6 +74,7 @@
           <div>
             <div class="eyebrow">Live control</div>
             <div class="card-title" style="margin-top:4px;font-size:19px;line-height:1.25">${escapeHtml(live.question)}</div>
+            ${live.pollType === 'bid' ? `<div class="mute-sm" style="margin-top:6px">🎯 Bid range · <strong style="color:var(--gold-300)">${escapeHtml(live.playerName || 'player')}</strong></div>` : ''}
           </div>
           ${isPaused ? '<span class="pill pill-paused">PAUSED</span>' : '<span class="pill pill-live"><span class="dot"></span>LIVE</span>'}
         </div>
@@ -82,19 +83,20 @@
             <div class="timer-ring" id="admin-ring" style="--pct:100"><span>⏱</span></div>
             <span id="admin-timer-text">--:--</span>
           </div>
-          <div class="vote-count">🗳️ <strong>${live.totalVotes}</strong> votes</div>
+          <div class="vote-count">${live.pollType === 'bid' ? '🎯' : '🗳️'} <strong>${live.totalVotes}</strong> ${live.pollType === 'bid' ? window.App.plural(live.totalVotes, 'guess', 'guesses') : 'votes'}</div>
           <div class="vote-count">👥 <strong>${state.stats.participants}</strong> participants</div>
         </div>
         <div class="poll-actions">${UI.controlButtons(live)}</div>
         <hr class="divider" />
-        <div class="row-between" style="flex-wrap:wrap;gap:10px">
+        ${live.pollType === 'bid' ? '' : `<div class="row-between" style="flex-wrap:wrap;gap:10px">
           <div class="mute-sm">Results visibility</div>
           <div class="segmented" style="max-width:330px;flex:1 1 240px">
             <button data-id="${live.id}" data-visibility="never" class="${live.showResults === 'never' ? 'active' : ''}">Private</button>
             <button data-id="${live.id}" data-visibility="during" class="${live.showResults === 'during' ? 'active' : ''}">Live</button>
             <button data-id="${live.id}" data-visibility="after" class="${live.showResults === 'after' ? 'active' : ''}">After close</button>
           </div>
-        </div>
+        </div>`}
+        ${live.pollType === 'bid' ? bidPricePanel(live) : ''}
         <div class="row" style="gap:8px;margin-top:14px;flex-wrap:wrap">
           <span class="mute-sm">Restart countdown:</span>
           ${[10, 15, 20, 30, 45, 60, 90, 120]
@@ -107,6 +109,7 @@
       </div>`;
 
     UI.bindActions(els.live, { onEdit: openEditor });
+    if (live.pollType === 'bid') wireBidPricePanel(live);
     els.live.querySelectorAll('[data-timer]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const seconds = Number(btn.dataset.timer);
@@ -290,12 +293,163 @@
           <a class="btn btn-ghost" href="/admin/participants">👥 Participants</a>
           <button class="btn btn-ghost" id="event-settings">⚙️ Event settings</button>
           <button class="btn btn-ghost" id="change-password">🔑 Password</button>
+          <button class="btn btn-ghost" id="session-check">🩺 Session check</button>
         </div>
       </div>`;
     document.getElementById('show-qr').addEventListener('click', showShareModal);
     document.getElementById('event-settings').addEventListener('click', showSettingsModal);
     document.getElementById('change-password').addEventListener('click', showPasswordModal);
+    document.getElementById('session-check').addEventListener('click', showSessionCheck);
     wireRapidRound();
+  }
+
+  /* 🎯 Bid round: enter the price the player actually sold for → 3 winners are computed. */
+  function bidPricePanel(poll) {
+    const ladder = (metaLadder() || []).length ? metaLadder() : [];
+    const hasPrice = poll.actualLakh != null;
+    const startIndex = hasPrice
+      ? Math.max(0, ladder.findIndex((x) => x.lakh === poll.actualLakh))
+      : Math.max(0, ladder.findIndex((x) => x.lakh === 1000));
+
+    return `
+      <div class="bid-admin ${hasPrice ? 'is-set' : ''}" style="margin-top:16px">
+        <div class="row-between" style="flex-wrap:wrap;gap:8px">
+          <div class="eyebrow" style="margin:0">💰 Enter the sold price</div>
+          ${
+            hasPrice
+              ? `<span class="pill pill-gold">SOLD ${escapeHtml(poll.actualLabel || '')}</span>`
+              : '<span class="pill pill-ghost">not entered yet</span>'
+          }
+        </div>
+        <p class="mute-sm" style="margin:8px 0 12px">
+          Slide to the final hammer price. Entering it closes the round and instantly declares the
+          three closest guesses on every phone and on the projector.
+        </p>
+        <div class="bid-admin-value" id="adm-bid-value">${escapeHtml(
+          ladder[startIndex] ? ladder[startIndex].label : '—'
+        )}</div>
+        <div class="row" style="gap:10px;align-items:center;margin-top:8px">
+          <button class="btn btn-ghost btn-sm" id="adm-bid-minus" aria-label="Lower">−</button>
+          <input class="bid-range" id="adm-bid-range" type="range" min="0" max="${ladder.length - 1}"
+                 step="1" value="${startIndex}" style="flex:1" aria-label="Sold price" />
+          <button class="btn btn-ghost btn-sm" id="adm-bid-plus" aria-label="Raise">+</button>
+        </div>
+        <div class="bid-chips" id="adm-bid-chips" style="justify-content:flex-start;margin-top:12px">
+          ${[20, 100, 500, 1000, 2000, 3000]
+            .map((lakh) => {
+              const idx = ladder.findIndex((x) => x.lakh === lakh);
+              return idx < 0 ? '' : `<button type="button" class="bid-chip" data-index="${idx}">${escapeHtml(ladder[idx].label)}</button>`;
+            })
+            .join('')}
+        </div>
+        <div class="row" style="gap:8px;margin-top:14px;flex-wrap:wrap">
+          <button class="btn btn-gold" id="adm-bid-save">${hasPrice ? 'Update price & re-rank' : 'Declare winners'}</button>
+          ${hasPrice ? '<button class="btn btn-ghost btn-sm" id="adm-bid-clear">Clear price</button>' : ''}
+        </div>
+      </div>`;
+  }
+
+  function metaLadder() {
+    return (window.__bidLadder || []).map((x) => ({ lakh: x.lakh, label: x.label }));
+  }
+
+  function wireBidPricePanel(poll) {
+    const ladder = metaLadder();
+    if (!ladder.length) {
+      // fetch once, then re-render
+      API.get('/api/meta')
+        .then((m) => {
+          window.__bidLadder = m.bid.ladder;
+          window.AdminShell.refresh();
+        })
+        .catch(() => toast('Could not load the price ladder', 'err'));
+      return;
+    }
+
+    const range = document.getElementById('adm-bid-range');
+    const valueEl = document.getElementById('adm-bid-value');
+    const chips = document.getElementById('adm-bid-chips');
+    const saveBtn = document.getElementById('adm-bid-save');
+    let index = Number(range.value);
+
+    const paint = () => {
+      valueEl.textContent = ladder[index] ? ladder[index].label : '—';
+      chips.querySelectorAll('.bid-chip').forEach((c) => {
+        c.classList.toggle('active', Number(c.dataset.index) === index);
+      });
+    };
+
+    range.addEventListener('input', () => {
+      index = Number(range.value);
+      paint();
+    });
+    document.getElementById('adm-bid-minus').addEventListener('click', () => {
+      index = Math.max(0, index - 1);
+      range.value = String(index);
+      paint();
+    });
+    document.getElementById('adm-bid-plus').addEventListener('click', () => {
+      index = Math.min(ladder.length - 1, index + 1);
+      range.value = String(index);
+      paint();
+    });
+    chips.addEventListener('click', (e) => {
+      const chip = e.target.closest('.bid-chip');
+      if (!chip) return;
+      index = Number(chip.dataset.index);
+      range.value = String(index);
+      paint();
+    });
+
+    saveBtn.addEventListener('click', async () => {
+      const step = ladder[index];
+      if (!step) return;
+      const ok = await window.App.confirmDialog({
+        title: `Sold for ${step.label}?`,
+        message: `This closes the round and declares the three closest guesses for ${poll.playerName || 'this player'}. You can correct the price later.`,
+        confirmText: 'Declare winners'
+      });
+      if (!ok) return;
+      setBusy(saveBtn, true, 'Declaring…');
+      try {
+        const res = await API.post(`/api/admin/polls/${poll.id}/actual`, { lakh: step.lakh });
+        haptic(30);
+        window.App.confetti(1600);
+        toast(
+          res.winners.length
+            ? `Winners: ${res.winners.map((w) => w.name).join(', ')}`
+            : 'Price saved — nobody guessed',
+          'ok'
+        );
+        window.AdminShell.refresh();
+      } catch (err) {
+        toast(err.message, 'err');
+      } finally {
+        setBusy(saveBtn, false);
+      }
+    });
+
+    const clearBtn = document.getElementById('adm-bid-clear');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', async () => {
+        const ok = await window.App.confirmDialog({
+          title: 'Clear the sold price?',
+          message: 'Participants will stop seeing the winners until you enter a price again.',
+          confirmText: 'Clear',
+          danger: true
+        });
+        if (!ok) return;
+        try {
+          await API.del(`/api/admin/polls/${poll.id}/actual`);
+          toast('Price cleared', 'ok');
+          window.AdminShell.refresh();
+        } catch (err) {
+          toast(err.message, 'err');
+        }
+      });
+    }
+
+    paint();
   }
 
   /* ⚡ One-tap round: create the poll, then start it with a seconds countdown. */
@@ -376,6 +530,85 @@
       </div>`
       )
       .join('');
+  }
+
+  /* 🩺 Session / deployment diagnostics: tells you exactly why the panel logs you out. */
+  async function showSessionCheck() {
+    const { backdrop, close } = buildModal(
+      `<div class="card-title">Session &amp; deployment check</div>
+       <p class="mute-sm" style="margin:10px 0 14px">Read live from this deployment. Useful when the panel
+       keeps bouncing you to the login page.</p>
+       <div id="diag-body"><div class="mute-sm">Checking…</div></div>`,
+      { wide: true }
+    );
+
+    let diag;
+    try {
+      diag = await API.get('/api/diag');
+    } catch (err) {
+      document.getElementById('diag-body').innerHTML =
+        `<div class="banner banner-warn">Could not reach /api/diag: ${escapeHtml(err.message)}</div>`;
+      return;
+    }
+
+    const row = (label, value, good) => `
+      <div class="row-between" style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,.07)">
+        <span class="mute-sm">${label}</span>
+        <strong style="color:${good === undefined ? 'var(--text)' : good ? 'var(--green-400, #35d07f)' : '#ff7b8a'}">
+          ${escapeHtml(String(value))}
+        </strong>
+      </div>`;
+
+    const r = diag.request || {};
+    const db = diag.database || {};
+    const cfg = diag.config || {};
+    const dep = diag.deployment || {};
+
+    document.getElementById('diag-body').innerHTML = `
+      <div class="eyebrow" style="margin-bottom:6px">Session</div>
+      ${row('Admin cookie present in this browser', r.hasAdminCookie ? 'yes' : 'NO', !!r.hasAdminCookie)}
+      ${row('Cookie found in database', r.adminCookieFoundInDatabase === undefined ? '—' : r.adminCookieFoundInDatabase ? 'yes' : 'NO', r.adminCookieFoundInDatabase)}
+      ${row('Session expires in', r.adminSessionExpiresInMs ? Math.round(r.adminSessionExpiresInMs / 60000) + ' min' : '—')}
+      <div class="eyebrow" style="margin:16px 0 6px">Database</div>
+      ${row('DATABASE_URL set', db.configured ? 'yes' : 'NO', !!db.configured)}
+      ${row('Reachable', db.reachable ? `yes (${db.latencyMs} ms)` : 'NO', !!db.reachable)}
+      ${row('Host', cfg.databaseHost || '—')}
+      ${row('Schema version', diag.schema?.schemaVersion || '—')}
+      ${row('Admin accounts / sessions', `${diag.counts?.admins ?? '—'} / ${diag.counts?.admin_sessions ?? '—'}`)}
+      ${row('Expired sessions sitting in DB', diag.counts?.expired_sessions ?? '—')}
+      <div class="eyebrow" style="margin:16px 0 6px">Deployment</div>
+      ${row('Commit', dep.commit ? dep.commit.slice(0, 7) : 'unknown (local)')}
+      ${row('Environment', dep.env || cfg.nodeEnv || 'local')}
+      ${row('Region', dep.region || '—')}
+      ${row('Secure cookie setting', cfg.cookieSecure ? 'on' : 'off')}
+      ${db.error ? `<div class="banner banner-warn" style="margin-top:12px">Database error: ${escapeHtml(db.error)}</div>` : ''}
+      ${
+        r.hasAdminCookie && r.adminCookieFoundInDatabase === false
+          ? `<div class="banner banner-warn" style="margin-top:12px">
+               The browser has an admin cookie but this deployment's database has no matching session.
+               That usually means the cookie belongs to a different database or a session reset.
+               Sign in again once — if it keeps happening, the deployment is pointing at a different database than before.
+             </div>`
+          : ''
+      }
+      ${
+        !r.hasAdminCookie
+          ? `<div class="banner banner-warn" style="margin-top:12px">
+               Your browser is not sending the admin cookie at all. If you are viewing this through a
+               link that is NOT the https address (or an embedded preview), open the deployment URL directly.
+             </div>`
+          : ''
+      }
+      <div class="row-between" style="margin-top:16px">
+        <button class="btn btn-ghost" data-close>Close</button>
+        <button class="btn btn-primary" id="diag-copy">Copy report</button>
+      </div>`;
+
+    document.getElementById('diag-copy').addEventListener('click', async () => {
+      await window.App.copyText(JSON.stringify(diag, null, 2));
+      toast('Report copied', 'ok');
+    });
+    backdrop.querySelector('[data-close]').addEventListener('click', close);
   }
 
   /* ------------------------------- modals ------------------------------- */
@@ -488,7 +721,8 @@
       if (next !== confirm) return toast('New passwords do not match', 'err');
       setBusy(e.currentTarget, true, 'Saving…');
       try {
-        await API.post('/api/admin/password', { currentPassword: current, newPassword: next });
+        const pw = await API.post('/api/admin/password', { currentPassword: current, newPassword: next });
+        if (pw && pw.token) window.dispatchEvent(new CustomEvent('app:new-admin-token', { detail: pw }));
         toast('Password updated', 'ok');
         document.getElementById('password-banner')?.classList.add('hidden');
         backdrop.remove();

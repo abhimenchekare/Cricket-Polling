@@ -14,6 +14,12 @@
       options.headers['Content-Type'] = 'application/json';
       options.body = JSON.stringify(body);
     }
+    // Admin calls always carry the token header when we have one. If the browser dropped
+    // the cookie (proxy, webview, privacy mode) the header keeps the panel signed in.
+    if (url.startsWith('/api/admin') || url.startsWith('/api/vote') || url.startsWith('/api/state')) {
+      const token = getAdminToken();
+      if (token && !options.headers['x-admin-token']) options.headers['x-admin-token'] = token;
+    }
     const res = await fetch(url, options);
     let data = null;
     const text = await res.text();
@@ -42,7 +48,31 @@
     return data;
   }
 
+  /* ---- admin token (belt and braces with the cookie) ---- */
+  const TOKEN_KEY = 'cp_admin_token';
+  function getAdminToken() {
+    try {
+      return localStorage.getItem(TOKEN_KEY) || '';
+    } catch {
+      return '';
+    }
+  }
+  function clearAdminToken() {
+    setAdminToken('');
+  }
+  function setAdminToken(token) {
+    try {
+      if (token) localStorage.setItem(TOKEN_KEY, token);
+      else localStorage.removeItem(TOKEN_KEY);
+    } catch {
+      /* storage blocked: cookie auth still works */
+    }
+  }
+
   const API = {
+    getAdminToken,
+    setAdminToken,
+    clearAdminToken,
     get: (url) => request('GET', url),
     post: (url, body) => request('POST', url, body || {}),
     put: (url, body) => request('PUT', url, body || {}),
@@ -186,7 +216,37 @@
     requestAnimationFrame(frame);
   }
 
+
+  /* ── bid round results, rendered compactly for history / reports ── */
+  function bidResultRows(results) {
+    if (!results || results.kind !== 'bid') return '';
+    const medal = ['🥇', '🥈', '🥉'];
+    if (!results.winners || !results.winners.length) {
+      return `<div class="mute-sm" style="padding:6px 2px">${
+        results.actualLakh ? 'Nobody guessed this round' : 'Waiting for the sold price'
+      }</div>`;
+    }
+    return results.winners
+      .map(
+        (w) => `
+      <div class="bid-winner rank-${w.rank}">
+        <span class="bid-medal">${medal[w.rank - 1] || '#' + w.rank}</span>
+        <div class="grow">
+          <div class="bid-winner-name">${escapeHtml(w.name)}</div>
+          <div class="mute-sm">${escapeHtml(w.guessLabel)} · ${escapeHtml(w.diffLabel)} ${
+            w.direction === 'exact' ? 'exact!' : w.direction
+          }</div>
+        </div>
+      </div>`
+      )
+      .join('');
+  }
+
   /* ------------------------------ formatting ---------------------------- */
+
+  function plural(n, one, many) {
+    return Number(n) === 1 ? one : many;
+  }
 
   function pad(n) {
     return String(n).padStart(2, '0');
@@ -403,6 +463,11 @@
     debounce,
     setBusy,
     createRealtime,
-    copyText
+    copyText,
+    plural,
+    bidResultRows,
+    getAdminToken,
+    setAdminToken,
+    clearAdminToken
   };
 })();

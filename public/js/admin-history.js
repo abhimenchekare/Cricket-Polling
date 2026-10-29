@@ -41,7 +41,9 @@
     listEl.innerHTML = polls
       .map((p) => {
         const winner = p.results?.leadingOptionId
-          ? p.results.rows.find((r) => r.optionId === p.results.leadingOptionId)
+          ? (p.results.kind === 'bid'
+              ? (p.results.winners && p.results.winners[0]) || null
+              : p.results.rows.find((r) => r.optionId === p.results.leadingOptionId))
           : null;
         return `
         <div class="card" style="margin-bottom:12px">

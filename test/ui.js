@@ -145,6 +145,24 @@ async function resetTestData() {
   ok('poll created and started from UI', await admin.locator('.poll-item.is-live').count() > 0);
   await shot(admin, '06-admin-polls-live.png');
 
+  /* Only one poll may be live for the room: close any stale leftovers so the participant
+     is guaranteed to land on the poll this test just created. */
+  await admin.evaluate(async () => {
+    const st = await (await fetch('/api/admin/state')).json();
+    const live = st.polls.filter((x) => ['active', 'paused'].includes(x.status));
+    const ours = st.polls.filter((x) => x.status === 'active' && x.question.startsWith('UI test'));
+    for (const poll of live) {
+      if (!ours.some((o) => o.id === poll.id)) {
+        await fetch(`/api/admin/polls/${poll.id}/action`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'close' })
+        });
+      }
+    }
+  });
+  await admin.waitForTimeout(500);
+
   /* participant sees live poll in real time */
   await p1.waitForTimeout(4500);
   const questionText = await p1.locator('.poll-question').textContent().catch(() => '');
@@ -246,6 +264,25 @@ async function resetTestData() {
     await admin.waitForTimeout(1500);
   }
   await shot(admin, '19-admin-polls-final.png');
+
+  /* tidy up: close anything left live and delete this run's poll, so the next suite
+     starts from a clean board (leftovers used to make these tests order-dependent) */
+  const tidyState = await admin.evaluate(async () => (await fetch('/api/admin/state')).json());
+  for (const poll of tidyState.polls) {
+    if (poll.question.startsWith('UI test')) {
+      await admin.evaluate(async (id) => {
+        await fetch(`/api/admin/polls/${id}`, { method: 'DELETE' });
+      }, poll.id);
+    } else if (['active', 'paused'].includes(poll.status)) {
+      await admin.evaluate(async (id) => {
+        await fetch(`/api/admin/polls/${id}/action`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'close' })
+        });
+      }, poll.id);
+    }
+  }
 
   await browser.close();
 

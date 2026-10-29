@@ -147,6 +147,11 @@
       return;
     }
 
+    if (p.pollType === 'bid') {
+      renderBidPoll(p);
+      return;
+    }
+
     const hasVoted = p.viewer.hasVoted;
     const myOption = p.options.find((o) => o.id === p.viewer.votedOptionId);
     const canVote = p.status === 'active' && !hasVoted;
@@ -231,6 +236,206 @@
         <p class="mute-sm center" style="margin-top:10px">You can vote only once in this poll.</p>
       </div>`;
     wireVoting(p);
+  }
+
+  /* ══════════════════════════ bid range poll ══════════════════════════ */
+
+  function bidLadder() {
+    return (meta && meta.bid && meta.bid.ladder) || [];
+  }
+
+  function bidHead(p) {
+    return `
+      <div class="poll-meta">
+        <span class="eyebrow">${escapeHtml(p.category || 'Bid range')}</span>
+        <div class="row" style="gap:8px">
+          <span class="pill pill-gold">🎯 Guess the price</span>
+          ${statusPill(p.status)}
+        </div>
+      </div>
+      ${p.playerName ? `<div class="bid-player"><span class="bid-player-tag">PLAYER</span>${escapeHtml(p.playerName)}</div>` : ''}
+      <h2 class="poll-question">${escapeHtml(p.question)}</h2>
+      <div class="row-between" style="gap:12px;margin-bottom:16px">
+        <div class="timer ${p.status === 'active' ? '' : 'is-urgent'}" id="timer" data-state="${p.status}">
+          <div class="timer-ring" id="timer-ring" style="--pct:100"><span>⏱</span></div>
+          <span id="timer-text">--:--</span>
+        </div>
+        <div class="vote-count">🎯 <strong id="vote-count-num">${p.totalVotes}</strong> ${window.App.plural(p.totalVotes, 'guess', 'guesses')}</div>
+      </div>`;
+  }
+
+  function renderBidPoll(p) {
+    const head = bidHead(p);
+    const ladder = bidLadder();
+
+    /* Already guessed → show their call, and the reveal when it lands. */
+    if (p.viewer.hasVoted) {
+      const mine = p.viewer.guessLakh != null ? p.viewer.guessLakh : p.myGuess && p.myGuess.lakh;
+      const mineLabel = mine != null ? ladderLabel(mine) : '—';
+      els.pollArea.innerHTML = `
+        <div class="card card-hero poll-card">${head}
+          <div class="voted-state pop">
+            <div class="check-ring"><svg viewBox="0 0 24 24"><path d="M4 12.5l5.2 5.2L20 6.8"/></svg></div>
+            <h3 style="font-size:20px">Your guess is locked in</h3>
+            <div class="bid-locked-value">${escapeHtml(mineLabel)}</div>
+            <p class="muted" style="margin-top:6px;font-size:14px">One guess per participant per player.</p>
+            <p class="mute-sm" style="margin-top:14px">${
+              p.resultsVisible
+                ? 'The hammer price is in — winners are below'
+                : 'The host will enter the sold price after the bidding ends'
+            }</p>
+          </div>
+        </div>`;
+      return;
+    }
+
+    if (p.status === 'closed') {
+      els.pollArea.innerHTML = `
+        <div class="card card-hero poll-card">${head}
+          <div class="locked"><span style="font-size:18px">🔒</span>
+            <div><strong>Guessing is closed for this player.</strong><br />${
+              p.resultsVisible ? 'Final standings are below.' : 'The host has not entered the sold price yet.'
+            }</div>
+          </div>
+        </div>`;
+      return;
+    }
+    if (p.status === 'paused') {
+      els.pollArea.innerHTML = `
+        <div class="card card-hero poll-card">${head}
+          <div class="locked" style="border-color:rgba(255,176,32,.35);background:rgba(255,176,32,.08)">
+            <span style="font-size:18px">⏸️</span>
+            <div><strong>Guessing is paused.</strong><br />Hold tight — the host will resume shortly.</div>
+          </div>
+        </div>`;
+      return;
+    }
+
+    /* Live: the drag bar */
+    const startIndex = Math.max(0, ladder.findIndex((x) => x.lakh === 1000)); // default 10 Cr
+    els.pollArea.innerHTML = `
+      <div class="card card-hero poll-card bid-card">${head}
+        <div class="bid-slider-wrap">
+          <div class="bid-value" id="bid-value">${escapeHtml(ladder[startIndex] ? ladder[startIndex].label : '—')}</div>
+          <div class="mute-sm center" style="margin-bottom:10px">Slide to your guess — drag the handle or use − / +</div>
+
+          <div class="bid-track-row">
+            <button class="bid-nudge" id="bid-minus" aria-label="Lower the guess">−</button>
+            <div class="bid-track">
+              <input id="bid-range" class="bid-range" type="range" min="0" max="${ladder.length - 1}"
+                     step="1" value="${startIndex}" aria-label="Guess the selling price" />
+              <div class="bid-scale"><span>20 L</span><span>1 Cr</span><span>10 Cr</span><span>30 Cr</span></div>
+            </div>
+            <button class="bid-nudge" id="bid-plus" aria-label="Raise the guess">+</button>
+          </div>
+
+          <div class="bid-chips" id="bid-chips">
+            ${[20, 100, 500, 1000, 2000, 3000]
+              .map((lakh) => {
+                const idx = ladder.findIndex((x) => x.lakh === lakh);
+                return idx < 0
+                  ? ''
+                  : `<button type="button" class="bid-chip" data-index="${idx}">${escapeHtml(ladderLabel(lakh))}</button>`;
+              })
+              .join('')}
+          </div>
+        </div>
+
+        <div class="sticky-action">
+          <button class="btn btn-primary btn-lg btn-block" id="vote-btn">
+            Lock in <span id="bid-btn-label">${escapeHtml(ladder[startIndex] ? ladder[startIndex].label : '')}</span>
+          </button>
+        </div>
+        <p class="mute-sm center" style="margin-top:10px">Closest guess to the sold price wins. You can guess once.</p>
+      </div>`;
+
+    wireBid(p, startIndex);
+  }
+
+  function ladderLabel(lakh) {
+    const found = bidLadder().find((x) => x.lakh === Number(lakh));
+    if (found) return found.label;
+    const n = Number(lakh);
+    if (n < 100) return `${n} L`;
+    const cr = n / 100;
+    return `${Number.isInteger(cr) ? cr.toFixed(2) : cr} Cr`;
+  }
+
+  function wireBid(poll, startIndex) {
+    const range = document.getElementById('bid-range');
+    const valueEl = document.getElementById('bid-value');
+    const labelEl = document.getElementById('bid-btn-label');
+    const voteBtn = document.getElementById('vote-btn');
+    const ladder = bidLadder();
+    let index = startIndex;
+
+    const paint = () => {
+      const step = ladder[index];
+      const text = step ? step.label : '—';
+      valueEl.textContent = text;
+      if (labelEl) labelEl.textContent = text;
+      valueEl.classList.remove('pop');
+      void valueEl.offsetWidth;
+      valueEl.classList.add('pop');
+      document.querySelectorAll('.bid-chip').forEach((chip) => {
+        chip.classList.toggle('active', Number(chip.dataset.index) === index);
+      });
+    };
+
+    range.addEventListener('input', () => {
+      index = Number(range.value);
+      haptic(5);
+      paint();
+    });
+    document.getElementById('bid-minus').addEventListener('click', () => {
+      index = Math.max(0, index - 1);
+      range.value = String(index);
+      haptic(6);
+      paint();
+    });
+    document.getElementById('bid-plus').addEventListener('click', () => {
+      index = Math.min(ladder.length - 1, index + 1);
+      range.value = String(index);
+      haptic(6);
+      paint();
+    });
+    document.getElementById('bid-chips').addEventListener('click', (e) => {
+      const chip = e.target.closest('.bid-chip');
+      if (!chip) return;
+      index = Number(chip.dataset.index);
+      range.value = String(index);
+      haptic(8);
+      paint();
+    });
+
+    voteBtn.addEventListener('click', async () => {
+      if (submitting) return;
+      const step = ladder[index];
+      if (!step) return;
+      submitting = true;
+      setBusy(voteBtn, true, 'Locking in…');
+      try {
+        const res = await API.post('/api/vote', { pollId: poll.id, guessLakh: step.lakh });
+        haptic(40);
+        window.App.confetti(1600);
+        toast(`Locked in at ${res.guessLabel}`, 'ok');
+        setTimeout(() => {
+          window.location.href = `/vote-confirmed?poll=${res.pollId}`;
+        }, 650);
+      } catch (err) {
+        submitting = false;
+        setBusy(voteBtn, false);
+        if (err.status === 409) {
+          toast(err.data?.alreadyVoted ? 'You already locked a guess' : err.message, 'info');
+          if (realtime) realtime.poke();
+          await loadState();
+        } else {
+          toast(err.message, 'err');
+        }
+      }
+    });
+
+    paint();
   }
 
   function optionHtml(option, selected, disabled) {
@@ -358,6 +563,11 @@
       return;
     }
 
+    if (p.results.kind === 'bid') {
+      renderBidResults(p);
+      return;
+    }
+
     const rows = p.results.rows.map((r) => resultRow(r, p.results.leadingOptionId, p.viewer.votedOptionId)).join('');
     els.resultsArea.innerHTML = `
       <div class="card fade-up">
@@ -371,6 +581,74 @@
         <div class="results">${rows}</div>
         ${p.anonymous ? '<p class="mute-sm" style="margin-top:12px">🕶️ Individual votes are anonymous in this poll.</p>' : ''}
       </div>`;
+  }
+
+  function renderBidResults(p) {
+    const r = p.results;
+    const medal = ['🥇', '🥈', '🥉'];
+    const viewer = r.viewer;
+
+    const winners = r.winners.length
+      ? r.winners
+          .map(
+            (w) => `
+        <div class="bid-winner rank-${w.rank}">
+          <span class="bid-medal">${medal[w.rank - 1] || '#' + w.rank}</span>
+          <div class="grow">
+            <div class="bid-winner-name">${escapeHtml(w.name)}</div>
+            <div class="mute-sm">guessed ${escapeHtml(w.guessLabel)} · ${escapeHtml(w.diffLabel)} ${
+              w.direction === 'exact' ? 'exact!' : w.direction
+            }</div>
+          </div>
+        </div>`
+          )
+          .join('')
+      : '<div class="empty">Nobody guessed in this round.</div>';
+
+    els.resultsArea.innerHTML = `
+      <div class="card fade-up">
+        <div class="card-head">
+          <div>
+            <div class="eyebrow">Hammer price</div>
+            <div class="card-title" style="margin-top:4px">${escapeHtml(p.playerName || 'This player')} sold for ${escapeHtml(
+              r.actualLabel || '—'
+            )}</div>
+          </div>
+          <span class="pill pill-gold">${r.totalGuesses} guess${r.totalGuesses === 1 ? '' : 'es'}</span>
+        </div>
+
+        ${
+          viewer
+            ? `<div class="bid-you ${viewer.isWinner ? 'is-winner' : ''}">
+                 <div>
+                   <div class="mute-sm">Your guess</div>
+                   <strong>${escapeHtml(viewer.guessLabel)}</strong>
+                   <span class="mute-sm">· ${escapeHtml(viewer.diffLabel)} ${viewer.direction === 'exact' ? 'exact!' : viewer.direction}</span>
+                 </div>
+                 <div class="bid-rank">${viewer.isWinner ? medal[viewer.rank - 1] || '#' + viewer.rank : '#' + viewer.rank}</div>
+               </div>`
+            : ''
+        }
+
+        <div class="eyebrow" style="margin:18px 0 10px">Top 3 closest guesses</div>
+        <div class="bid-winners">${winners}</div>
+
+        <div class="eyebrow" style="margin:18px 0 10px">How the room guessed</div>
+        <div class="bid-dist">
+          ${r.distribution
+            .map(
+              (d) => `
+            <div class="bid-dist-row ${d.isActual ? 'is-actual' : ''}">
+              <span class="bid-dist-label">${escapeHtml(d.label)}${d.isActual ? ' ← sold' : ''}</span>
+              <div class="bar-track"><div class="bar-fill" data-w="${d.percent}"></div></div>
+              <span class="bid-dist-count">${d.count}</span>
+            </div>`
+            )
+            .join('')}
+        </div>
+      </div>`;
+
+    animateBars(els.resultsArea);
   }
 
   function resultRow(r, leaderId, myVoteId) {
@@ -409,7 +687,11 @@
               <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
             </button>
             <div class="accordion-body">
-              <div class="results">${h.results.rows.map((r) => resultRow(r, h.results.leadingOptionId, h.viewer?.votedOptionId ?? null)).join('')}</div>
+              <div class="results">${
+                h.results.kind === 'bid'
+                  ? window.App.bidResultRows(h.results)
+                  : h.results.rows.map((r) => resultRow(r, h.results.leadingOptionId, h.viewer?.votedOptionId ?? null)).join('')
+              }</div>
               <p class="mute-sm" style="margin-top:8px">${h.totalVotes} votes · closed ${window.App.timeAgo(h.closedAt)}</p>
             </div>
           </div>`).join('')}
