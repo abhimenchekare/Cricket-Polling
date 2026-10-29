@@ -24,10 +24,17 @@ if (!CONNECTION_STRING) {
 
 const isLocal = /@(localhost|127\.0\.0\.1|::1)[:/]/.test(CONNECTION_STRING);
 
+/**
+ * Neon's pooler drops idle TCP connections; a fresh TLS handshake per cold start costs
+ * 200-400 ms on every request. `keepAlive` + a longer idle timeout keep the socket warm
+ * for the whole life of the lambda, and SSL is left to the connection string.
+ */
 const pool = new Pool({
   connectionString: CONNECTION_STRING,
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 5000,
   max: Number(process.env.PG_POOL_MAX || 3),
-  idleTimeoutMillis: 10_000,
+  idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 10_000,
   ssl: isLocal ? undefined : { rejectUnauthorized: false }
 });
