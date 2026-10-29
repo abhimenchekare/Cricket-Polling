@@ -85,6 +85,35 @@
     confetti(1600);
   }
 
+  /* The audience usually stays on this page after guessing. When the host shouts the NEXT player,
+     say so here and let them jump straight back to the slider. */
+  let seenPollId = null;
+  function watchNextShout(payload) {
+    const p = payload.poll;
+    if (!p || !p.playerName) return;
+    if (seenPollId === null) {
+      seenPollId = p.id;
+      return;
+    }
+    if (p.id === seenPollId || p.status !== 'active') return;
+    seenPollId = p.id;
+    if (p.viewer && p.viewer.hasVoted) return; // already guessed this one
+
+    let banner = document.getElementById('next-shout');
+    if (!banner) {
+      banner = document.createElement('a');
+      banner.id = 'next-shout';
+      banner.href = '/poll';
+      banner.style.cssText =
+        'display:block;margin-top:18px;padding:16px 18px;border-radius:16px;text-decoration:none;' +
+        'background:linear-gradient(120deg,rgba(255,199,66,.22),rgba(255,199,66,.06));' +
+        'border:1px solid rgba(255,199,66,.5);color:#fff;font:700 15px/1.35 system-ui,sans-serif';
+      contentEl.appendChild(banner);
+    }
+    banner.innerHTML = `📣 <strong style="color:#ffd166">${escapeHtml(p.playerName)}</strong> is on the block — tap to set your price`;
+    window.App.haptic && window.App.haptic([16, 30, 16]);
+  }
+
   async function load() {
     try {
       const meta = await API.get('/api/meta');
@@ -94,7 +123,9 @@
       }
       document.querySelectorAll('[data-event-name]').forEach((el) => (el.textContent = meta.event.name));
       document.querySelectorAll('[data-event-tagline]').forEach((el) => (el.textContent = meta.event.tagline || ''));
-      render(await API.get('/api/state'));
+      const payload = await API.get('/api/state');
+      render(payload);
+      watchNextShout(payload);
     } catch {
       window.App.toast('Could not load your confirmation', 'err');
     }
@@ -102,4 +133,13 @@
 
   load();
   setInterval(load, 20000);
+
+  if (window.App && window.App.createLiveChannel) {
+    window.App.createLiveChannel({
+      onData: (payload) => {
+        if (payload && payload.poll) watchNextShout(payload);
+      },
+      onError: () => {}
+    });
+  }
 })();

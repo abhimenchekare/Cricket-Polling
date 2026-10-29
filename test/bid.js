@@ -222,8 +222,8 @@ async function main() {
   section('Voting rules still hold');
   const late = await clients.a.post('/api/vote', { pollId, guessLakh: 500 });
   ok('no extra guesses after the round', late.status === 409, `status ${late.status}`);
-  const wrongPoll = await admin.post('/api/admin/polls/' , { pollType: 'choice', question: 'x', options: [] });
-  ok('choice polls still require options', wrongPoll.status === 400);
+  const choiceTry = await admin.post('/api/admin/polls', { pollType: 'choice', question: 'x', options: [] });
+  ok('multiple-choice polls are refused (slider only)', choiceTry.status === 400, `status ${choiceTry.status}`);
 
   section('Cleanup');
   await admin.del(`/api/admin/polls/${pollId}`);

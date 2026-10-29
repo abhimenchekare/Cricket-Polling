@@ -8,10 +8,25 @@
  *   npm run demo-data -- --clean
  *
  * Demo rows use employee IDs starting with "DEMO-".
+ * It also loads a 10-player auction list (see /admin/players) so you can rehearse
+ * the SHOUT button in the real bidding order.
  */
 
 require('dotenv').config({ quiet: true });
 const { init, q } = require('../server/db');
+
+const DEMO_PLAYERS = [
+  ['Rohit Sharma', 'Batter', 200],
+  ['Jasprit Bumrah', 'Bowler', 200],
+  ['Virat Kohli', 'Batter', 200],
+  ['Hardik Pandya', 'All-rounder', 150],
+  ['Rishabh Pant', 'Wicketkeeper', 150],
+  ['Ravindra Jadeja', 'All-rounder', 125],
+  ['Suryakumar Yadav', 'Batter', 100],
+  ['KL Rahul', 'Wicketkeeper', 100],
+  ['Mohammed Siraj', 'Bowler', 75],
+  ['Shubman Gill', 'Batter', 75]
+];
 
 const DEMO_PEOPLE = [
   ['Aarav Mehta', 'DEMO-01', 'Mumbai Mavericks'],
@@ -35,6 +50,26 @@ const DEMO_PEOPLE = [
   ['Yash Thakur', 'DEMO-19', 'Delhi Dynamos'],
   ['Aisha Khan', 'DEMO-20', 'Bangalore Blasters']
 ];
+
+async function addPlayers() {
+  let added = 0;
+  for (let i = 0; i < DEMO_PLAYERS.length; i++) {
+    const [name, role, base] = DEMO_PLAYERS[i];
+    const res = await q(
+      `INSERT INTO auction_players (name, role, base_lakh, position, status, created_at)
+       SELECT $1, $2, $3, COALESCE((SELECT MAX(position) + 1 FROM auction_players), 1), 'queued', $4
+       WHERE NOT EXISTS (SELECT 1 FROM auction_players WHERE lower(name) = lower($1))
+       RETURNING id`,
+      [name, role, base, Date.now()]
+    );
+    if (res.length) added++;
+  }
+  console.log(
+    added
+      ? `Added ${added} player(s) to the auction list — open /admin/players to see the bidding order.`
+      : 'The auction list already has these players — nothing added.'
+  );
+}
 
 async function clean() {
   const ids = DEMO_PEOPLE.map((p) => p[1]);
@@ -103,7 +138,10 @@ async function seed() {
 (async () => {
   await init();
   if (process.argv.includes('--clean')) await clean();
-  else await seed();
+  else {
+    await seed();
+    await addPlayers();
+  }
   process.exit(0);
 })().catch((err) => {
   console.error('Failed:', err.message);

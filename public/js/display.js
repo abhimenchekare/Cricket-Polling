@@ -196,7 +196,13 @@
       </div>
       ${podium}`;
     animBars();
-    hintEl.textContent = showResults ? 'Winners' : closed ? 'Waiting for the sold price' : 'Bid round live';
+    hintEl.textContent = state.auction && state.auction.upNext
+      ? `Next up: ${state.auction.upNext}`
+      : showResults
+        ? 'Winners'
+        : closed
+          ? 'Waiting for the sold price'
+          : 'Bid round live';
   }
 
   function renderActive(p) {

@@ -34,7 +34,7 @@ const shot = (page, name) => page.screenshot({ path: path.join(SHOT_DIR, name) }
 function watch(page, tag) {
   page.on('pageerror', (e) => errors.push(`[${tag}] ${e.message}`));
   page.on('console', (m) => {
-    if (m.type() === 'error' && !/status of 40[13]/.test(m.text())) errors.push(`[${tag}] ${m.text()}`);
+    if (m.type() === 'error' && !/status of 40[13]|navigator\.vibrate/.test(m.text())) errors.push(`[${tag}] ${m.text()}`);
   });
 }
 
@@ -92,16 +92,15 @@ async function cleanLeftovers() {
   await admin.goto(`${BASE}/admin/polls`, { waitUntil: 'networkidle' });
   await admin.click('#new-poll');
   await admin.waitForTimeout(500);
-  await admin.click('#type-seg button[data-type="bid"]');
   await admin.waitForTimeout(300);
 
   ok('player field appears', await admin.locator('#f-player').isVisible());
-  ok('answer options are hidden for bid rounds', !(await admin.locator('#options-section').isVisible()));
-  ok('a 20s default countdown is suggested', Number(await admin.inputValue('#f-timer')) <= 30);
+  ok('there is no multiple-choice editor at all', (await admin.locator('#type-seg, #options-section').count()) === 0);
+  ok('a short default countdown is suggested', Number(await admin.inputValue('#f-timer')) <= 30);
 
   const player = 'Rohit ' + Date.now().toString().slice(-4);
   await admin.fill('#f-player', player);
-  await admin.fill('#f-question-bid', '');
+  await admin.fill('#f-question', '');
   await admin.click('#save-start');
   await admin.waitForTimeout(2200);
 

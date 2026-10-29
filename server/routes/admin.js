@@ -7,6 +7,7 @@ const auth = require('../auth');
 const state = require('../state');
 const config = require('../config');
 const ladder = require('../bidladder');
+const auction = require('../auction');
 
 const router = express.Router();
 
@@ -280,6 +281,11 @@ router.delete('/polls/:id/actual', async (req, res, next) => {
   try {
     const poll = await one('SELECT * FROM polls WHERE id = $1', [Number(req.params.id)]);
     if (!poll) return res.status(404).json({ error: 'Poll not found' });
+    // the hammer price is being removed, so the player is no longer sold
+    await q(
+      "UPDATE auction_players SET status = CASE WHEN status = 'sold' THEN 'on_block' ELSE status END, sold_lakh = NULL, sold_at = NULL WHERE poll_id = $1",
+      [poll.id]
+    );
     await q(
       `UPDATE polls SET actual_lakh = NULL, actual_set_at = NULL, actual_set_by = NULL,
                         updated_at = $1, revision = revision + 1 WHERE id = $2`,
@@ -566,6 +572,9 @@ router.post('/polls/:id/actual', async (req, res, next) => {
       req.admin.username
     );
 
+    // If this round came from the roster, the player is now SOLD at that price.
+    const settledPlayer = await auction.markSoldForPoll(poll.id, lakhValue);
+
     const fresh = await state.getPoll(poll.id);
     const results = await state.getBidResults(fresh);
     res.json({
@@ -573,7 +582,10 @@ router.post('/polls/:id/actual', async (req, res, next) => {
       actualLakh: lakhValue,
       actualLabel: ladder.label(lakhValue),
       winners: results.winners,
-      totalGuesses: results.totalGuesses
+      totalGuesses: results.totalGuesses,
+      player: settledPlayer
+        ? { id: settledPlayer.id, name: settledPlayer.name, status: settledPlayer.status }
+        : null
     });
   } catch (err) {
     next(err);
@@ -600,6 +612,7 @@ router.get('/polls/:id/guesses', async (req, res, next) => {
     const anonymous = Number(poll.anonymous) === 1;
     const sold = poll.actual_lakh == null ? null : Number(poll.actual_lakh);
     const ladder = require('../bidladder');
+const auction = require('../auction');
 
     res.json({
       poll: {
@@ -822,6 +835,257 @@ router.put('/settings', async (req, res, next) => {
     }
     await logActivity('settings.updated', 'Event settings updated', req.admin.username);
     res.json({ ok: true, settings: await allSettings({ fresh: true }) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* ------------------------------ auction roster ---------------------------
+   The host never types a player name during the auction. They load the roster
+   once, then press SHOUT: the next player in the list goes on the block.
+-------------------------------------------------------------------------- */
+
+router.get('/players', async (req, res, next) => {
+  try {
+    const [rows, block, counts] = await Promise.all([auction.list(), auction.onBlock(), auction.counts()]);
+    const next = rows.filter((r) => r.status === auction.STATUS.QUEUED).slice(0, 5);
+    res.json({
+      players: rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        role: r.role,
+        baseLakh: r.base_lakh == null ? null : Number(r.base_lakh),
+        baseLabel: r.base_lakh == null ? null : ladder.label(Number(r.base_lakh)),
+        position: Number(r.position),
+        status: r.status,
+        pollId: r.poll_id,
+        soldLakh: r.sold_lakh == null ? null : Number(r.sold_lakh),
+        soldLabel: r.sold_lakh == null ? null : ladder.label(Number(r.sold_lakh)),
+        shoutedAt: r.shouted_at == null ? null : Number(r.shouted_at),
+        guessCount: Number(r.guess_count || 0)
+      })),
+      onBlock: block
+        ? { id: block.id, name: block.name, pollId: block.poll_id, shoutedAt: Number(block.shouted_at || 0) }
+        : null,
+      upNext: next.map((r) => ({ id: r.id, name: r.name, position: Number(r.position) })),
+      counts
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Paste a list: one player per line, optionally "Name, Role, Base". */
+router.post('/players', async (req, res, next) => {
+  try {
+    const raw = req.body?.names ?? req.body?.players ?? req.body?.name;
+    let entries = [];
+    if (Array.isArray(raw)) entries = raw;
+    else if (typeof raw === 'string') entries = raw.split(/\r?\n/);
+    entries = entries.map((e) => String(e)).filter((e) => e.trim());
+
+    if (!entries.length) return res.status(400).json({ error: 'Paste at least one player name' });
+    if (entries.length > 500) return res.status(400).json({ error: 'Add at most 500 players at a time' });
+
+    const result = await auction.addMany(entries);
+    const counts = await auction.counts();
+    res.status(201).json({
+      ok: true,
+      added: result.added.length,
+      skipped: result.skipped,
+      counts
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/players/:id', async (req, res, next) => {
+  try {
+    const row = await auction.rename(Number(req.params.id), req.body || {});
+    if (!row) return res.status(404).json({ error: 'Player not found' });
+    res.json({ ok: true, player: row });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/players/:id', async (req, res, next) => {
+  try {
+    const row = await auction.removePlayer(Number(req.params.id));
+    if (!row) return res.status(404).json({ error: 'Player not found' });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Move one player up (-1) or down (+1). */
+router.post('/players/:id/move', async (req, res, next) => {
+  try {
+    const delta = Number(req.body?.delta) === -1 ? -1 : 1;
+    await auction.nudge(Number(req.params.id), delta);
+    const rows = await auction.list();
+    res.json({ ok: true, players: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/players/reorder', async (req, res, next) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number) : [];
+    if (!ids.length) return res.status(400).json({ error: 'Send the ordered list of player ids' });
+    const rows = await auction.reorder(ids);
+    res.json({ ok: true, players: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Reset the run: everyone back in the queue, nothing sold. */
+router.post('/players/reset', async (req, res, next) => {
+  try {
+    if (req.body?.confirm !== true) {
+      return res.status(400).json({ error: 'Reset needs confirmation', needsConfirm: true });
+    }
+    await auction.resetAll();
+    res.json({ ok: true, ...(await auction.counts()) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * 📣 SHOUT — the one button the host presses.
+ * Takes the next queued player, opens the price-guess round for them and starts it.
+ * The live stream carries it to every phone and the projector instantly.
+ */
+router.post('/shout', async (req, res, next) => {
+  try {
+    // A round may already be live — settle it first so the room never has two live rounds.
+    const live = await one(
+      "SELECT * FROM polls WHERE status IN ('active','paused') ORDER BY id DESC LIMIT 1"
+    );
+    if (live && req.body?.force !== true) {
+      const block = await auction.onBlock();
+      if (block && block.poll_id === live.id) {
+        return res.status(409).json({
+          error: `${live.player_name || 'This player'} is still on the block. Enter the sold price or skip them first.`,
+          onBlock: { id: block.id, name: block.name, pollId: live.id }
+        });
+      }
+    }
+
+    const next5 = await auction.queue(1);
+    const player = next5[0];
+    if (!player) {
+      return res.status(409).json({
+        error: 'Nobody left in the queue. Add players to the auction list first.',
+        empty: true
+      });
+    }
+
+    const timerSeconds =
+      Number(req.body?.timerSeconds) > 0 ? Math.min(Number(req.body.timerSeconds), 3600) : 60;
+    const now = Date.now();
+
+    const poll = await one(
+      `INSERT INTO polls (question, description, category, status, show_results, anonymous,
+                          timer_seconds, remaining_ms, poll_type, player_name, player_id,
+                          created_at, updated_at, created_by)
+       VALUES ($1, $2, 'Bid range', 'draft', 'after', 0, $3, $4, 'bid', $5, $6, $7, $7, $8)
+       RETURNING *`,
+      [
+        auction.questionFor(player.name),
+        `On the block · ${timerSeconds}s`,
+        timerSeconds,
+        timerSeconds * 1000,
+        player.name,
+        player.id,
+        now,
+        req.admin.username
+      ]
+    );
+
+    await q(
+      "UPDATE auction_players SET status = 'on_block', poll_id = $1, shouted_at = $2 WHERE id = $3",
+      [poll.id, now, player.id]
+    );
+
+    // start it immediately — this is what the audience sees
+    const startedAt = Date.now();
+    const endsAt = timerSeconds > 0 ? startedAt + timerSeconds * 1000 : null;
+    await q(
+      `UPDATE polls SET status = 'active', started_at = $1, ends_at = $2, remaining_ms = $3,
+                        revision = revision + 1, updated_at = $1
+        WHERE id = $4`,
+      [startedAt, endsAt, timerSeconds * 1000, poll.id]
+    );
+
+    // any other live round is paused so exactly one round is on screen
+    await q(
+      "UPDATE polls SET status = 'paused', updated_at = $1 WHERE status = 'active' AND id <> $2",
+      [startedAt, poll.id]
+    );
+
+    await logActivity('auction.shout', `📣 ${player.name} is on the block`, req.admin.username);
+
+    const remaining = await auction.counts();
+    res.status(201).json({
+      ok: true,
+      shouted: { id: player.id, name: player.name },
+      poll: { id: poll.id, question: auction.questionFor(player.name), timerSeconds },
+      counts: remaining,
+      upNext: (await auction.queue(3)).map((r) => ({ id: r.id, name: r.name }))
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Undo the last shout: delete its round, put the player back in the queue. */
+router.post('/shout/undo', async (req, res, next) => {
+  try {
+    const block = await auction.onBlock();
+    if (!block) return res.status(409).json({ error: 'Nobody is on the block right now' });
+    if (block.poll_id) {
+      const votes = Number(
+        (await one('SELECT COUNT(*)::int AS c FROM votes WHERE poll_id = $1', [block.poll_id])).c
+      );
+      if (votes > 0 && req.body?.confirm !== true) {
+        return res.status(409).json({
+          error: `${votes} ${votes === 1 ? 'guess has' : 'guesses have'} already been locked for ${block.name}. Undo anyway?`,
+          needsConfirm: true
+        });
+      }
+      await q('DELETE FROM polls WHERE id = $1', [block.poll_id]);
+    }
+    await auction.requeue(block.id);
+    await logActivity('auction.shout_undo', `Undid the shout for ${block.name}`, req.admin.username);
+    res.json({ ok: true, player: { id: block.id, name: block.name }, counts: await auction.counts() });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Pass over the current player (they come back to the queue) or mark them unsold. */
+router.post('/players/:id/skip', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const row = await one('SELECT * FROM auction_players WHERE id = $1', [id]);
+    if (!row) return res.status(404).json({ error: 'Player not found' });
+
+    if (row.poll_id) {
+      await q(
+        "UPDATE polls SET status = 'closed', closed_at = $1, ends_at = NULL, revision = revision + 1, updated_at = $1 WHERE id = $2",
+        [Date.now(), row.poll_id]
+      );
+    }
+    const status = req.body?.status === 'unsold' ? 'unsold' : 'queued';
+    await q('UPDATE auction_players SET status = $1, poll_id = NULL WHERE id = $2', [status, id]);
+    await logActivity('auction.skip', `${row.name} marked ${status}`, req.admin.username);
+    res.json({ ok: true, counts: await auction.counts() });
   } catch (err) {
     next(err);
   }

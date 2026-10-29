@@ -55,7 +55,7 @@
         <div class="row" style="gap:6px">
           <button class="btn btn-ghost btn-sm" data-act="toggle" title="${p.blocked ? 'Unblock' : 'Block'}">${p.blocked ? '✅' : '🚫'}</button>
           <button class="btn btn-ghost btn-sm" data-act="clear" title="Clear this participant's votes">⟲</button>
-          <button class="btn btn-ghost btn-sm" data-act="delete" title="Remove participant">🗑</button>
+          <button class="btn btn-ghost btn-sm" data-act="delete" title="Remove participant" aria-label="Remove participant"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/></svg></button>
         </div>
       </div>`
       )

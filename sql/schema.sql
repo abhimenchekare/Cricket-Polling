@@ -108,3 +108,28 @@ ALTER TABLE votes ALTER COLUMN option_id DROP NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_votes_poll_guess ON votes(poll_id, guess_lakh);
 CREATE INDEX IF NOT EXISTS idx_polls_type ON polls(poll_type);
+
+-- ---------------------------------------------------------------------------
+-- Auction roster (v3.1) — the player sequence the host shouts from.
+-- The host never types a name during the auction: they press SHOUT and the next
+-- queued player goes on the block.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS auction_players (
+  id         SERIAL PRIMARY KEY,
+  name       TEXT NOT NULL,
+  role       TEXT,                                   -- optional label: Batter / Bowler / All-rounder
+  base_lakh  INTEGER,                                -- optional base price from the auction sheet
+  position   INTEGER NOT NULL DEFAULT 0,             -- shout order (ascending)
+  status     TEXT NOT NULL DEFAULT 'queued',         -- queued | on_block | sold | unsold | skipped
+  poll_id    INTEGER REFERENCES polls(id) ON DELETE SET NULL,
+  sold_lakh  INTEGER,
+  sold_at    BIGINT,
+  shouted_at BIGINT,
+  created_at BIGINT NOT NULL
+);
+
+ALTER TABLE polls ADD COLUMN IF NOT EXISTS player_id INTEGER REFERENCES auction_players(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_auction_players_order ON auction_players(position, id);
+CREATE INDEX IF NOT EXISTS idx_auction_players_status ON auction_players(status);
+CREATE INDEX IF NOT EXISTS idx_polls_player ON polls(player_id);

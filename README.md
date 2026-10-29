@@ -5,9 +5,29 @@ A complete live polling website for your office cricket auction, built to run **
 - **No QR codes.** You share one link (`https://your-app.vercel.app`) in WhatsApp/email and everyone opens it on their phone.
 - **No office Wi-Fi needed.** Employees can be on 4G/5G, home Wi-Fi, anything — it's a public HTTPS site.
 - **Admin sets any countdown**: 10s, 15s, 20s, 30s, 45s, 1 min, custom seconds… and can restart or extend it **while the poll is live**.
+- **One button runs the auction.** Paste the player list once; after that every round is a single press of **SHOUT** — you never type a player name during the bidding (see §4a).
 
 > This is a separate project from your auction website (own deployment, own database, own config).
 > The earlier localStorage/SQLite/LAN build is still in the workspace as `cricket-polling/`, but **use this folder** for Vercel.
+
+---
+
+## What this app does (v3.1.4 — auction list + SHOUT)
+
+An office-cricket-auction companion for the audience's phones.
+
+- **You paste the auction list once.** Every player you are selling goes into **Auction list**, in
+  bidding order. Names can include a role and a base price (`Rohit Sharma, Batter, 2 Cr`).
+- **Then you only press SHOUT.** One big button shouts the next player in that list onto the block:
+  every phone instantly announces *"ON THE BLOCK — `<player>`"* and shows the **price slider** from
+  20 L to 30.00 Cr on the auction's own ladder. One guess per person per player.
+  **You never type a player name during the auction.**
+- **Instant everywhere.** A push stream (SSE) delivers the round, the countdown, the guesses and the
+  results to every phone and to the projector in ~250 ms. No refresh, no waiting for a poll tick.
+- **The admin's answer sheet.** For any round: who guessed what, how far off they were, their rank, and
+  everyone who hasn't guessed yet. Enter the sold price → the three closest guesses are declared and
+  the player is marked SOLD on the list with their price.
+- **There is no multiple-choice polling.** It was removed in v3.0.0 (see §4g).
 
 ---
 
@@ -120,18 +140,81 @@ When a countdown reaches zero the poll closes automatically: further votes are r
 
 ---
 
-## 4b. ⚡ Rapid round — "who gets bid next?" in 10–15 seconds
+## 4a. 📣 Auction list + the SHOUT button (v3.1.0) — the way you run the auction
 
-The auction runs for hours, so the fastest engagement loop should be one tap:
+This is the whole workflow. Two screens, one button.
 
-1. Admin dashboard → **Rapid round** card (above Quick actions).
-2. Question + one player per line as options (remembered in your browser, so round 2 is instant).
-3. Pick the countdown: **10s / 15s / 20s / 30s / 45s / 60s**.
-4. **Create & start round** — created, made live and the clock starts in a single action.
+### Step 1 — paste the players once (before the auction)
 
-Participants' phones switch to the new question within ~3 s, voting locks the moment the clock hits
-zero, and the result appears on every screen (phones + projector) automatically — no second click.
-Press the same button again for the next player.
+**Auction list** in the sidebar (`/admin/players`). Paste your list, one player per line:
+
+```
+Rohit Sharma, Batter, 2 Cr
+Jasprit Bumrah, Bowler, 1.5 Cr
+Hardik Pandya, All-rounder
+Rishabh Pant, Wicketkeeper, 1 Cr
+```
+
+- Only the **name** is required. The role and base price are optional; the price is understood as
+  lakh (`2 Cr` → 200 L, `80 L` → 80 L, plain `75` → 75 L).
+- Duplicates are skipped, so you can re-paste a corrected list without creating doubles.
+- `↑ ↓` change the bidding order, click a name to rename, `×` removes, `Clear list` (with a
+  confirmation) empties it. Nothing here is typed again on the day.
+
+### Step 2 — press SHOUT for every player
+
+On the **Dashboard**, the top panel is the auction queue:
+
+- **ON THE BLOCK** — the player whose round is open right now, and how many guesses are in.
+- **The gold button** — `SHOUT: <next player>`. It always shows the name *before* you press it.
+- **SOLD 4 / 12** — how far down the list you are.
+
+Press it once and, in under a second, every phone and the projector announce
+**"ON THE BLOCK — `<player>`"** with a full-screen splash, then land on the slider. The round opens
+with the countdown from your **Shout settings** card (10s / 15s / 20s / 30s / 45s / 60s / 90s / 2 min,
+remembered in your browser; default 60s).
+
+### Step 3 — enter the sold price
+
+When the hammer falls, type the price in **Enter the sold price**. That closes the round, ranks the
+guesses and declares the three closest on every phone and on the projector in ~250 ms. The player is
+then marked **SOLD 2.10 Cr** on the list, and the button is already pointing at the next name.
+
+**You cannot skip this.** If a round is live and no price is entered, SHOUT asks you first — because
+the three winners of that player would be lost.
+
+### The buttons around the shout panel
+
+| Button | What it does |
+| --- | --- |
+| `Skip <player>` | Their round closes and they are **not** put on the block; the list moves on. |
+| `Mark unsold` | The player is recorded as UNSOLD (no price), and the report keeps that. |
+| `Undo shout` | Pulls the player back to the queue and deletes the round (confirm first). |
+| `Manage list` | Jumps to the Auction list. |
+| `Coming up` | The next five names, so you can see where you are. |
+
+### What the audience sees
+
+- A new player shouted → full-screen **ON THE BLOCK** splash (2 s) with the name, then the slider.
+  This also happens on the **confirmation page**, which shows a tappable *"`<player>` is on the block
+  — tap to set your price"* banner, so nobody misses a round by staying on their last confirmation.
+- A small **⏭ next** pill on the poll screen, and `Next up: <player>` on the projector.
+
+### If you get stuck
+
+- **"Shout did not open a round"** — a round for that same player is still live without a price.
+  Enter the price (or `Undo shout`) and press again.
+- **"The auction list is empty"** — paste players in `/admin/players` first.
+- **Two people with the same name** — the paste appends them both; rename one to tell them apart.
+
+## 4b. ⚡ Round length — "Shout settings"
+
+The auction runs for hours, so the loop is one tap. The **Shout settings** card on the dashboard
+(just below the shout panel) picks the countdown that every SHOUT will use:
+
+**10s · 15s · 20s · 30s · 45s · 60s · 90s · 2 min**, remembered in your browser (default 60s).
+Changing it affects the *next* shout; a round already running keeps its own clock, and `+30s` in the
+live control panel extends it.
 
 Countdowns under a minute show as plain seconds (`15s`, `8s`); longer ones stay `mm:ss`.
 
@@ -237,8 +320,67 @@ no floating-point rounding can ever make two different guesses look equal.
 | Admin dashboard | `/admin` |
 | Create & manage polls | `/admin/polls` |
 | Participant management | `/admin/participants` |
+| **Auction list (players)** | **`/admin/players`** |
 | History & reports | `/admin/history` |
 | Full-screen display | `/display` |
+
+---
+
+## 4g. Slider-only rounds (v3.0.0)
+
+Multiple-choice polls have been **removed from the product**. Every round is now a price guess:
+
+> "What will be the bid range for **<player> player**?"
+
+and the audience answers by dragging a slider over the auction ladder (20 L … 30.00 Cr).
+
+What this means in practice:
+
+- The poll editor has **three fields**: player name, optional question text, optional description.
+  Leave the question empty and the server writes *"What will be the bid range for `<player>` player?"*.
+  There are no answer options anywhere — trying to POST one is rejected.
+- `POST /api/vote` accepts only `{pollId, guessLakh}`. A body with `optionId` is refused with
+  *"Multiple-choice polls have been removed — pick a price with the slider"*.
+- The one-tap **⚡ Next player** card on the dashboard now takes a player name and starts the round.
+- Old multiple-choice rows in an existing database still open and still show their old results
+  read-only; nothing new can create one.
+
+### The admin's answer sheet (new)
+
+"Who guessed what, and who hasn't guessed yet?" is now a first-class screen, not an export.
+
+Open it from **Polls → 👥 All guesses & winners**, from **History → 👥 All guesses**, or from the
+live round's **👥 Guesses** button.
+
+```
+GET /api/admin/polls/:id/guesses      (admin session required)
+
+{
+  "poll":  { "id": 44, "question": "What will be the bid range for Rohit Sharma player?",
+             "playerName": "Rohit Sharma", "status": "closed",
+             "actualLakh": 185, "actualLabel": "1.85 Cr", "totalGuesses": 4 },
+  "revealed": true,
+  "winners": [ { "rank": 1, "name": "Aarav Mehta", "guessLabel": "1.75 Cr",
+                 "diffLabel": "10 L", "direction": "under" }, ... ],
+  "participants": [
+    { "participantId": 7, "name": "Aarav Mehta", "employeeId": "EMP-672905",
+      "hasGuessed": true, "guessLabel": "1.75 Cr",
+      "diffLakh": 10, "diffLabel": "10 L", "direction": "under",
+      "rank": 1, "isWinner": true },
+    { "participantId": 9, "name": "Priya Nair", "hasGuessed": false, "rank": null }
+  ]
+}
+```
+
+- **Every participant appears**, guessers first in rank order, then everyone still missing.
+- Filter chips: Everyone / Guessed / Not yet — so the host can chase the last few people.
+- Type the sold price in the sheet itself (`1.85 Cr`, `185 L`, `1.85` all parse) and the three
+  winners are declared on the spot, on every phone and on the projector.
+- Export CSV and open the projector from the same sheet.
+- The sheet refreshes itself while the round is open, so the "not yet" count drops live.
+
+Scoring is unchanged: closest guess wins, ties go to whoever locked in first, top three are
+declared, and a guess that is wildly far away never wins (it is simply ranked last).
 
 ---
 
@@ -413,7 +555,7 @@ npm install
 npm run dev                   # http://localhost:4000
 
 npm run seed                  # show what's in the DB
-npm run demo-data             # 20 fake participants + votes (DEMO-xx)
+npm run demo-data             # 20 fake participants + votes + a 10-player auction list
 npm run demo-data -- --clean  # remove them
 npm run reset -- --yes        # wipe everything and re-seed
 ```
@@ -421,19 +563,39 @@ npm run reset -- --yes        # wipe everything and re-seed
 ### Tests (all passing)
 
 ```bash
-npm run dev                                  # terminal 1
-node test/e2e.js                             # 74 API/data checks
-node test/ui.js                              # 23 browser checks (npx playwright install chromium)
-node test/serverless-sim.js 4030 &           # simulate Vercel: only /api/* reaches the function
-BASE_URL=http://localhost:4030 SKIP_PAGES=1 node test/e2e.js
-node test/check-vercel-config.js             # vercel.json + routes + no socket/QR leftovers
+npm run dev                        # terminal 1: http://localhost:4000
+
+npm run test:e2e                   # API + data rules
+npm run test:bid                   # slider maths, ranking, winners
+npm run test:shout                 # 📣 roster → SHOUT → sold price → next player (browser)
+npm run test:ui                    # participant + admin pages (npx playwright install chromium)
+npm run test:ui-bid                # the slider round, end to end
+npm run test:ui-rapid              # round-length presets (10s/15s/…)
+npm run test:ui-session            # admin sign-in, session, logout
+npm run test:live                  # push latency + polling fallback
+npm run test:routes                # every page + API route on the deployment
+npm run test:config                # vercel.json / rewrite / no-socket checks
+npm run test:perf                  # perceived load speed
 ```
 
-**Results:** 74/74 API · 23/23 browser (iPhone 13 + desktop, zero console errors) · 74/74 **through the serverless simulator** · 29/29 Vercel config checks · data persists across restarts and redeploys (Postgres).
+**Current results (local, v3.1.4), all with zero failures:**
 
-Covered: all pages, admin auth, poll CRUD, join/validation, **duplicate vote → 409**, vote before start, vote while paused, **vote after the deadline → 409**, **timer auto-close**, **10s/15s/restart/extend/no-limit timers**, all three result-visibility modes, single shared active poll, reset with confirmation, blocking a participant, CSV exports, settings propagation, per-viewer payload isolation, and persistence.
+| Suite | Checks | What it proves |
+| --- | --- | --- |
+| `e2e` | 117 | auth, poll CRUD, join, duplicate + post-deadline blocking, timers, visibility, reset, CSV |
+| `bid` | 49 | ladder steps, lakh storage, ranking, three winners |
+| **`shout`** | **34** | paste → order → SHOUT → splash on the phone → sold price → SOLD → next SHOUT, plus undo/skip/guards |
+| `ui` | 31 | join, dashboard, projector, mobile layouts |
+| `ui-bid` | 25 | the full slider round on an iPhone 13 |
+| `ui-rapid` | 18 | 10s…2 min presets, remembered across reloads, used by the next SHOUT |
+| `ui-session` | 30 | admin sign-in/session/logout |
+| `live` | 10 | start→phone 276 ms, vote→projector 123 ms, price→winners 244 ms, fallback polling |
+| `routes` | 17 | `/admin/players` and every other route on a real deployment |
+| `config` | 36 | Vercel rewrites, serverless layout, no Socket.IO / QR / local-file DB |
+| `perf` | 3 | `/api/state` p95 32 ms, poll screen usable in 78 ms |
 
-Screenshots of the browser run: `test/screenshots/`.
+Screenshots of the browser runs land in `test/screenshots/` (`sh1-auction-list.png`,
+`sh2-shout-splash.png`, `sh3-on-the-block.png`, …).
 
 ---
 
@@ -468,14 +630,15 @@ cricket-polling-vercel/
 │  ├─ db.js                  pg pool, schema bootstrap, first-run seed
 │  ├─ auth.js                bcrypt admin login, cookie sessions, guards
 │  ├─ state.js               poll snapshots, lazy timer expiry, visibility rules
+│  ├─ auction.js             the auction list: order, on-the-block, sold/unsold, SHOUT helpers
 │  ├─ settings.js            cached event settings
 │  ├─ config.js              env defaults (timer + polling cadence)
 │  └─ routes/public.js       meta · state · join · vote · results · history
-│  └─ routes/admin.js        login · polls + lifecycle · timer · participants · settings · CSV
-├─ public/                   10 HTML pages, 4 CSS files, 12 JS modules
+│  └─ routes/admin.js        login · polls · players (/players, /shout) · participants · settings · CSV
+├─ public/                   11 HTML pages (incl. admin-players.html), 4 CSS files, 14 JS modules
 ├─ sql/schema.sql            Postgres schema (idempotent)
 ├─ scripts/                  seed · reset · demo-data
-├─ test/                     e2e.js · ui.js · serverless-sim.js · check-vercel-config.js
+├─ test/                     e2e · bid · shout · ui · ui-bid · ui-rapid · ui-session · live · routes · perf · config
 ├─ vercel.json               function config, clean URLs, rewrites, no-store headers
 ├─ .env.example
 └─ package.json
@@ -500,8 +663,12 @@ cricket-polling-vercel/
 
 ## 10. What's intentionally not included
 
-Per the original brief: no player prediction scoring, no player selection, no auction bidding/management, no automatic player reveals, no prediction accuracy scoring. Polling only.
+Per the original brief: this is the **audience companion**, not the auction itself. It does not take
+bids, does not decide who wins a player, and does not touch your auction website.
+
+The auction list here is only a **queue for shouting players onto the block** — a name, an optional
+role and base price, and the price you type when the hammer falls. That is all it stores.
 
 ---
 
-*Cricket Auction Live Polling — v2.0.0 · Express + Postgres on Vercel · separate from the auction website.*
+*Cricket Auction Live Polling — v3.1.4 · Express + Postgres on Vercel · separate from the auction website.*

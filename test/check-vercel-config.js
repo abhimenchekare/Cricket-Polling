@@ -58,6 +58,17 @@ if (config) {
       fs.existsSync(path.join(ROOT, 'scripts', 'vercel-build.js'))
   );
   ok('no "builds" array alongside outputDirectory (they conflict)', !Array.isArray(config.builds));
+  // cleanUrls 308-redirects "*.html", so a rewrite pointing there serves the wrong page.
+  const htmlRewrites = (config.rewrites || []).filter((r) => String(r.destination || '').endsWith('.html'));
+  ok(
+    'no rewrite destination ends in .html (breaks with cleanUrls)',
+    htmlRewrites.length === 0,
+    htmlRewrites.map((r) => `${r.source} -> ${r.destination}`).join(', ')
+  );
+  ok(
+    'admin pretty URLs keep working (/admin/polls → /admin-polls)',
+    (config.rewrites || []).some((r) => r.source === '/admin/polls' && r.destination === '/admin-polls')
+  );
   ok(
     'all /api traffic is rewritten to the function',
     (config.rewrites || []).some((r) => r.source === '/api/(.*)' && r.destination === '/api/index')
@@ -71,7 +82,9 @@ if (config) {
 
   for (const r of config.rewrites || []) {
     if (!r.destination.startsWith('/api')) {
-      const file = path.join(ROOT, 'public', r.destination.replace(/^\//, ''));
+      // clean URLs: /admin-polls resolves to public/admin-polls.html
+      const base = r.destination.replace(/^\//, '').replace(/\.html$/, '');
+      const file = path.join(ROOT, 'public', base + '.html');
       ok(`rewrite ${r.source} → ${r.destination} has a matching file`, fs.existsSync(file));
     }
   }

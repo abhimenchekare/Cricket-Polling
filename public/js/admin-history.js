@@ -53,7 +53,7 @@
           <div class="poll-item-meta">${UI.metaChips(p)}</div>
           ${
             winner
-              ? `<div class="banner banner-ok" style="margin:10px 0">🏆 Winner: <strong>${escapeHtml(
+              ? `<div class="banner banner-plain banner-ok" style="margin:10px 0">🏆 Winner: <strong>${escapeHtml(
                   winner.name
                 )}</strong> · guessed ${escapeHtml(winner.guessLabel)} · ${escapeHtml(
                   winner.diffLabel

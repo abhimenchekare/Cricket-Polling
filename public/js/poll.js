@@ -112,6 +112,14 @@
       selectedOptionId = payload.poll.viewer.votedOptionId;
     }
 
+    // 📣 A player was just shouted onto the block → announce it loudly on the phone.
+    const spokeNew =
+      payload.poll &&
+      payload.poll.playerName &&
+      payload.poll.status === 'active' &&
+      (!prev || !prev.poll || prev.poll.id !== payload.poll.id);
+    if (spokeNew) announceShout(payload.poll.playerName);
+
     const closedNow = prev?.poll && payload.poll && prev.poll.id === payload.poll.id && prev.poll.status === 'active' && payload.poll.status === 'closed';
     renderPoll();
     renderResults();
@@ -122,6 +130,37 @@
       haptic(60);
       toast('Voting closed for this poll', 'info');
     }
+  }
+
+  /* 📣 ON THE BLOCK splash — shown the moment the host shouts a new player. */
+  let shoutTimer = null;
+  function announceShout(playerName) {
+    let el = document.getElementById('shout-splash');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'shout-splash';
+      el.setAttribute('role', 'status');
+      document.body.appendChild(el);
+    }
+    el.innerHTML = `
+      <div class="shout-splash-inner">
+        <div class="shout-splash-mic" aria-hidden="true"><svg viewBox="0 0 48 48" width="52" height="52" fill="none">
+          <path d="M6 20v8h7l10 8V12L13 20H6z" fill="#ffd166"/>
+          <path d="M30 16c3 2.4 3 13.6 0 16" stroke="#ffd166" stroke-width="3.4" stroke-linecap="round"/>
+          <path d="M37 10c6 4.6 6 23.4 0 28" stroke="#ffd166" stroke-width="3.4" stroke-linecap="round" opacity=".6"/>
+        </svg></div>
+        <div class="shout-splash-label">ON THE BLOCK</div>
+        <div class="shout-splash-name">${window.App.escapeHtml(playerName)}</div>
+        <div class="shout-splash-hint">Set your price below</div>
+      </div>`;
+    el.classList.remove('shout-splash-out');
+    el.classList.add('shout-splash-in');
+    haptic([18, 40, 18]);
+    clearTimeout(shoutTimer);
+    shoutTimer = setTimeout(() => {
+      el.classList.add('shout-splash-out');
+      setTimeout(() => el.classList.remove('shout-splash-in', 'shout-splash-out'), 500);
+    }, 2200);
   }
 
   /* ------------------------------- render -------------------------------- */
@@ -136,7 +175,12 @@
         'guess',
         'guesses'
       )}</span>
-      ${p ? '' : '<span class="pill pill-draft">No live poll</span>'}
+      ${p ? '' : '<span class="pill pill-draft">Waiting for the next shout</span>'}
+      ${
+        state.auction && state.auction.upNext && p
+          ? `<span class="pill pill-ghost">⏭&nbsp;next: ${window.App.escapeHtml(state.auction.upNext)}</span>`
+          : ''
+      }
     `;
   }
 

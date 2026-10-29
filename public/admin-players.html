@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#050b1c" />
+<meta name="robots" content="noindex" />
+<title>Auction List · Admin</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏏</text></svg>" />
+<link rel="stylesheet" href="/css/theme.css?v=3.1.4" />
+<link rel="stylesheet" href="/css/admin.css?v=3.1.4" />
+</head>
+<body class="admin-body">
+<div class="admin">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">🏏</div>
+      <div class="brand-text">
+        <div class="brand-title" data-event-name>Cricket Auction</div>
+        <div class="brand-sub">Poll control</div>
+      </div>
+    </div>
+    <a class="side-link" data-nav href="/admin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Dashboard</a>
+    <a class="side-link" data-nav href="/admin-polls"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 5h11M9 12h11M9 19h11"/><circle cx="4.5" cy="5" r="1.5"/><circle cx="4.5" cy="12" r="1.5"/><circle cx="4.5" cy="19" r="1.5"/></svg>Rounds</a>
+    <a class="side-link active" data-nav href="/admin-players"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2a5 5 0 1 0 0 10A5 5 0 1 0 12 2z"/><path d="M4 22a8 8 0 0 1 16 0"/></svg>Auction list</a>
+    <a class="side-link" data-nav href="/admin-participants"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg>Participants</a>
+    <a class="side-link" data-nav href="/admin-history"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 4-6"/></svg>History &amp; reports</a>
+    <div class="side-sep"></div>
+    <a class="side-link" href="/display" target="_blank" rel="noopener">🖥 Big screen</a>
+    <button class="side-link" data-logout style="background:none;border:0;cursor:pointer;width:100%;text-align:left;font:inherit">Sign out</button>
+    <div class="grow"></div>
+    <div class="mute-sm" style="padding:10px 12px">Signed in as<br /><strong data-admin-name style="color:var(--text)">admin</strong></div>
+  </aside>
+
+  <div class="admin-main">
+    <header class="admin-top">
+      <a class="icon-btn" href="/admin" aria-label="Back to dashboard">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>
+      </a>
+      <div>
+        <h1>Auction list</h1>
+        <div class="admin-top-sub">The shout order — paste once, never type a name again</div>
+      </div>
+      <div class="grow"></div>
+      <span id="admin-conn"></span>
+      <a class="btn btn-primary btn-sm" href="/admin">📣 Back to SHOUT</a>
+    </header>
+
+    <main class="admin-content">
+      <!-- paste list -->
+      <section class="card" id="import-card">
+        <div class="card-head">
+          <div>
+            <div class="eyebrow">Add players</div>
+            <div class="card-title" style="margin-top:4px">Paste the auction sheet</div>
+          </div>
+          <span class="pill pill-ghost" id="roster-count">0 players</span>
+        </div>
+        <p class="mute-sm" style="margin:0 0 12px">
+          One player per line. Optionally add a role and a base price
+          (<code>Rohit Sharma, Batter, 2 Cr</code>). The order here is the order they are shouted.
+        </p>
+        <textarea class="textarea" id="import-text" rows="7" style="font-family:var(--mono,ui-monospace,monospace);font-size:13px"
+          placeholder="Rohit Sharma, Batter, 2 Cr&#10;Jasprit Bumrah, Bowler, 1.5 Cr&#10;Hardik Pandya, All-rounder&#10;Rishabh Pant"></textarea>
+        <div class="row" style="gap:10px;margin-top:12px;flex-wrap:wrap">
+          <button class="btn btn-primary" id="import-btn">+ Add to the list</button>
+          <button class="btn btn-ghost" id="demo-btn">Load 10 sample players</button>
+          <span class="grow"></span>
+          <span class="mute-sm" id="import-note"></span>
+        </div>
+      </section>
+
+      <!-- queue -->
+      <section class="card" style="margin-top:16px">
+        <div class="card-head">
+          <div>
+            <div class="eyebrow">Shout order</div>
+            <div class="card-title" style="margin-top:4px">Who goes on the block next</div>
+          </div>
+          <div class="row" style="gap:8px">
+            <button class="btn btn-ghost btn-sm" id="reset-btn">⟲ Reset the run</button>
+          </div>
+        </div>
+        <div class="filter-chips" id="p-filters" style="margin-bottom:12px">
+          <button class="chip active" data-pfilter="all">All</button>
+          <button class="chip" data-pfilter="queued">Queued</button>
+          <button class="chip" data-pfilter="on_block">On the block</button>
+          <button class="chip" data-pfilter="sold">Sold</button>
+          <button class="chip" data-pfilter="unsold">Unsold</button>
+        </div>
+        <div id="player-list"></div>
+      </section>
+    </main>
+
+    <nav class="tabbar">
+      <a class="tab" href="/admin">Home</a>
+      <a class="tab" href="/admin-polls">Rounds</a>
+      <a class="tab active" href="/admin-players">Players</a>
+      <a class="tab" href="/admin-history">Reports</a>
+    </nav>
+  </div>
+</div>
+
+<script src="/js/app.js?v=3.1.4"></script>
+<script src="/js/guess-sheet.js?v=3.1.4"></script>
+<script src="/js/admin-shell.js?v=3.1.4"></script>
+<script src="/js/admin-players.js?v=3.1.4"></script>
+</body>
+</html>

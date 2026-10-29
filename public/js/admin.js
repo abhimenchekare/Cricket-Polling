@@ -1,10 +1,19 @@
 /* Admin dashboard */
 (function () {
   'use strict';
+
+  /* Shout horn — inline SVG so it looks identical on Windows, Android and iOS. */
+  const SHOUT_HORN =
+    '<svg viewBox="0 0 48 48" width="26" height="26" fill="none" aria-hidden="true" style="vertical-align:-5px;margin-right:9px">' +
+    '<path d="M6 20v8h7l10 8V12L13 20H6z" fill="currentColor"/>' +
+    '<path d="M30 16c3 2.4 3 13.6 0 16" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/>' +
+    '<path d="M37 10c6 4.6 6 23.4 0 28" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" opacity=".65"/>' +
+    '</svg>';
   const { API, toast, escapeHtml, confirmDialog, setBusy, formatDate, timeAgo, haptic } = window.App;
   const UI = window.AdminPollUI;
 
   const els = {
+    shout: document.getElementById('shout-panel'),
     kpis: document.getElementById('dash-kpis'),
     live: document.getElementById('live-control'),
     results: document.getElementById('dash-results'),
@@ -19,6 +28,7 @@
 
   function render(state) {
     tickOffset = state.serverTime - Date.now();
+    renderShout(state);
     renderKpis(state);
     renderLive(state);
     renderResults(state);
@@ -26,6 +36,210 @@
     renderQuick(state);
     renderActivity(state);
     UI.animateBars(document);
+  }
+
+  /* ------------------------------ 📣 SHOUT -------------------------------- */
+
+  /** The one control the host uses: call the next player onto the block. */
+  function renderShout(state) {
+    if (!els.shout) return;
+    const a = state.auction || { players: [], counts: {}, upNext: [] };
+    const counts = a.counts || {};
+    const live =
+      state.polls.find((p) => p.status === 'active') || state.polls.find((p) => p.status === 'paused');
+    const block = a.players.find((p) => p.status === 'on_block') || null;
+    const next = (a.upNext || [])[0] || null;
+    const sold = Number(counts.sold || 0);
+    const total = Number(counts.total || 0);
+
+    if (!total) {
+      els.shout.innerHTML = `
+        <div class="card" style="margin-bottom:16px;border-color:rgba(246,196,83,.45)">
+          <div class="card-head">
+            <div>
+              <div class="eyebrow">📣 On the block</div>
+              <div class="card-title" style="margin-top:4px">Load your player list first</div>
+            </div>
+          </div>
+          <p class="muted" style="font-size:14px;margin:0 0 14px">
+            Paste the auction list once (one player per line). After that you never type a name again —
+            you just press <strong>SHOUT</strong> and the next player is on every screen.
+          </p>
+          <a class="btn btn-gold btn-lg" href="/admin-players">📋 Add players</a>
+        </div>`;
+      return;
+    }
+
+    const blockLine = block
+      ? `<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+           <span class="pill pill-live"><span class="dot"></span>ON THE BLOCK</span>
+           <span style="font:800 clamp(22px,3vw,34px)/1.1 system-ui;color:var(--gold-300,#ffd166)">${escapeHtml(
+             block.name
+           )}</span>
+           ${block.guessCount ? `<span class="mute-sm">${block.guessCount} ${window.App.plural(block.guessCount, 'guess', 'guesses')}</span>` : ''}
+         </div>`
+      : `<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+           <span class="mute-sm">Nobody is on the block.</span>
+           ${
+             next
+               ? `<span style="font:800 clamp(18px,2.4vw,26px)/1.1 system-ui;color:var(--text,#fff)">Next: ${escapeHtml(
+                   next.name
+                 )}</span>`
+               : `<span class="mute-sm">Queue is empty.</span>`
+           }
+         </div>`;
+
+    const pendingRound = block && live && block.pollId === live.id;
+    const soldPriceMissing = pendingRound && !live.actualLakh;
+
+    els.shout.innerHTML = `
+      <div class="card card-hero" style="margin-bottom:16px;border-color:rgba(246,196,83,.4)">
+        <div class="card-head" style="align-items:flex-start">
+          <div class="grow">
+            <div class="eyebrow">📣 Auction queue</div>
+            <div style="margin-top:10px">${blockLine}</div>
+          </div>
+          <div style="text-align:right">
+            <div class="mute-sm">SOLD</div>
+            <div style="font:800 20px/1 system-ui;color:var(--gold-300,#ffd166)">${sold}<span class="mute-sm" style="font-weight:600"> / ${total}</span></div>
+          </div>
+        </div>
+
+        <button id="shout-btn" class="btn btn-gold" style="width:100%;padding:20px;font:900 clamp(18px,2.2vw,24px)/1 system-ui;letter-spacing:.06em;margin-top:6px">
+          ${SHOUT_HORN}SHOUT${next ? ': ' + escapeHtml(next.name).toUpperCase() : ''}
+        </button>
+
+        <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap">
+          ${
+            block
+              ? `<button class="btn btn-ghost btn-sm" id="shout-skip">↷ Skip ${escapeHtml(block.name)}</button>
+                 <button class="btn btn-ghost btn-sm" id="shout-unsold">✖ Mark unsold</button>
+                 <button class="btn btn-ghost btn-sm" id="shout-undo">⟲ Undo shout</button>`
+              : ''
+          }
+          <a class="btn btn-ghost btn-sm" href="/admin-players">📋 Manage list</a>
+          <span class="grow"></span>
+          <span class="mute-sm">${counts.queued || 0} still queued</span>
+        </div>
+
+        ${
+          pendingRound
+            ? `<div class="banner banner-plain ${soldPriceMissing ? '' : 'banner-ok'}" style="margin-top:12px">
+                 ${
+                   soldPriceMissing
+                     ? `Enter what <strong>${escapeHtml(block.name)}</strong> actually sold for to declare the three winners — they cannot guess the next player until you do.`
+                     : `Sold for <strong>${escapeHtml(live.actualLabel || '')}</strong> · winners declared. Shout the next player when ready.`
+                 }
+               </div>`
+            : ''
+        }
+
+        ${
+          (a.upNext || []).length
+            ? `<div style="margin-top:14px">
+                 <div class="eyebrow" style="margin-bottom:8px">Coming up</div>
+                 <div class="row" style="gap:8px;flex-wrap:wrap">
+                   ${a.upNext
+                     .map(
+                       (p, i) =>
+                         `<span class="pill pill-ghost">${i + 1}. ${escapeHtml(p.name)}</span>`
+                     )
+                     .join('')}
+                 </div>
+               </div>`
+            : ''
+        }
+      </div>`;
+
+    wireShout(state, block, live);
+  }
+
+  function wireShout(state, block, live) {
+    const button = document.getElementById('shout-btn');
+    const next = (state.auction && state.auction.upNext && state.auction.upNext[0]) || null;
+
+    const doShout = async (force) => {
+      if (!next) return toast('The queue is empty — add players to the list', 'err');
+      const okToGo =
+        force ||
+        !block ||
+        (live && live.actualLakh) ||
+        (await confirmDialog({
+          title: 'Move on?',
+          message: `<strong>${escapeHtml(block.name)}</strong> is still on the block and the sold price is not entered. Shout ${
+            next ? escapeHtml(next.name) : 'the next player'
+          } anyway? Their round will be closed without winners.`,
+          confirmText: 'Shout next player'
+        }));
+      if (!okToGo) return;
+
+      setBusy(button, true, 'Shouting…');
+      try {
+        const res = await API.post('/api/admin/shout', { force: Boolean(force), timerSeconds: shoutSeconds() });
+        toast(`📣 ${res.shouted.name} is on the block`, 'ok');
+        haptic && haptic(30);
+        window.AdminShell.refresh();
+      } catch (err) {
+        if (err.data && err.data.empty) {
+          toast('Queue is empty — add more players', 'err');
+        } else if (err.data && err.data.onBlock) {
+          toast(err.message, 'err');
+        } else {
+          toast(err.message, 'err');
+        }
+      } finally {
+        setBusy(button, false);
+      }
+    };
+
+    button.addEventListener('click', () => doShout(false));
+    button.addEventListener('dblclick', (e) => e.preventDefault());
+
+    const skip = document.getElementById('shout-skip');
+    if (skip)
+      skip.addEventListener('click', async () => {
+        const ok = await confirmDialog({
+          title: `Skip ${block.name}?`,
+          message: 'Their round closes and they go back to the end of the queue.',
+          confirmText: 'Skip'
+        });
+        if (!ok) return;
+        await API.post(`/api/admin/players/${block.id}/skip`, { status: 'queued' });
+        toast(`${block.name} skipped`, 'info');
+        window.AdminShell.refresh();
+      });
+
+    const unsold = document.getElementById('shout-unsold');
+    if (unsold)
+      unsold.addEventListener('click', async () => {
+        const ok = await confirmDialog({
+          title: `Mark ${block.name} unsold?`,
+          message: 'Their round closes and they are recorded as UNSOLD in the report.',
+          confirmText: 'Mark unsold',
+          danger: true
+        });
+        if (!ok) return;
+        await API.post(`/api/admin/players/${block.id}/skip`, { status: 'unsold' });
+        toast(`${block.name} marked unsold`, 'info');
+        window.AdminShell.refresh();
+      });
+
+    const undo = document.getElementById('shout-undo');
+    if (undo)
+      undo.addEventListener('click', async () => {
+        try {
+          await API.post('/api/admin/shout/undo', { confirm: true });
+          toast('Shout undone — player is back in the queue', 'ok');
+        } catch (err) {
+          toast(err.message, 'err');
+        }
+        window.AdminShell.refresh();
+      });
+  }
+
+  /** Countdown for the round a shout opens (remembered between shouts). */
+  function shoutSeconds() {
+    return Number(localStorage.getItem('shout_seconds')) || 60;
   }
 
   function renderKpis(state) {
@@ -231,37 +445,33 @@
       <div class="card" id="rapid-card" style="margin-bottom:16px">
         <div class="card-head">
           <div>
-            <div class="eyebrow">⚡ Next player</div>
-            <div class="card-title" style="margin-top:4px">Open a bid round in one tap</div>
+            <div class="eyebrow">📣 Shout settings</div>
+            <div class="card-title" style="margin-top:4px">Round length per player</div>
           </div>
-          <span class="pill pill-live">10–30 SEC</span>
+          <span class="pill pill-live">AUTO</span>
         </div>
         <p class="mute-sm" style="margin:0 0 12px">
-          Type the player on the block, tap start: every phone gets the price slider instantly, guesses
-          lock when the clock hits 0&nbsp;s, and the three closest guesses are declared when you enter the
-          sold price.
+          Every SHOUT opens a fresh round for the next player in the auction list with this countdown.
+          The player name comes from the list — you never type it during the auction.
         </p>
-        <label class="field" style="display:block;margin-bottom:10px">
-          <span class="mute-sm">Player name</span>
-          <input class="input" id="rr-player" maxlength="80" placeholder="e.g. Rohit Sharma" style="margin-top:6px" />
-        </label>
         <div class="row-between" style="flex-wrap:wrap;gap:10px;margin-bottom:12px">
           <span class="mute-sm">Countdown</span>
           <div class="segmented" id="rr-seconds" style="max-width:340px;flex:1 1 220px">
-            ${[10, 15, 20, 30, 45, 60]
+            ${[10, 15, 20, 30, 45, 60, 90, 120]
               .map(
                 (sec) =>
                   `<button type="button" data-sec="${sec}" class="${
-                    Number(localStorage.getItem('rr_seconds')) === sec ||
-                    (!localStorage.getItem('rr_seconds') && sec === 20)
+                    shoutSeconds() === sec
                       ? 'active'
-                      : ''
-                  }">${sec}s</button>`
+                      : !localStorage.getItem('shout_seconds') && sec === 60
+                        ? 'active'
+                        : ''
+                  }">${sec < 60 ? sec + 's' : sec / 60 + ' min'}</button>`
               )
               .join('')}
           </div>
         </div>
-        <button class="btn btn-gold" id="rr-start" style="width:100%">⚡ Start bid round</button>
+        <a class="btn btn-ghost" href="/admin-players" style="width:100%">📋 Open the auction list</a>
       </div>
 
       <div class="card">
@@ -437,60 +647,17 @@
     paint();
   }
 
-  /* ⚡ One-tap bid round: type the player, create and start in a single press. */
+  /* 📣 Round length for each shout (remembered on this device). */
   function wireRapidRound() {
-    const playerEl = document.getElementById('rr-player');
     const secondsEl = document.getElementById('rr-seconds');
-    const startBtn = document.getElementById('rr-start');
-    if (!playerEl || !startBtn) return;
-
-    let seconds = Number(localStorage.getItem('rr_seconds')) || 20;
-
+    if (!secondsEl) return;
     secondsEl.querySelectorAll('button').forEach((btn) => {
       btn.addEventListener('click', () => {
-        seconds = Number(btn.dataset.sec);
-        localStorage.setItem('rr_seconds', String(seconds));
+        const seconds = Number(btn.dataset.sec);
+        localStorage.setItem('shout_seconds', String(seconds));
         secondsEl.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b === btn));
+        toast(`Each shout opens a ${seconds}s round`, 'info');
       });
-    });
-
-    const start = async () => {
-      const playerName = playerEl.value.trim();
-      if (!playerName) {
-        playerEl.focus();
-        return toast('Type the player name first', 'err');
-      }
-      startBtn.disabled = true;
-      startBtn.textContent = 'Starting…';
-      try {
-        const created = await API.post('/api/admin/polls', {
-          playerName,
-          question: `What will be the bid range for ${playerName} player?`,
-          description: `Bid round · ${seconds}s`,
-          category: 'Bid range',
-          showResults: 'after',
-          anonymous: false,
-          timerSeconds: seconds
-        });
-        const id = created.poll.id;
-        await API.post(`/api/admin/polls/${id}/action`, { action: 'start', timerSeconds: seconds });
-        toast(`${playerName} is live on every phone — ${seconds}s on the clock`, 'ok');
-        playerEl.value = '';
-        window.AdminShell.refresh();
-      } catch (err) {
-        toast(err.message || 'Could not start the round', 'err');
-      } finally {
-        startBtn.disabled = false;
-        startBtn.innerHTML = '⚡ Start bid round';
-      }
-    };
-
-    startBtn.addEventListener('click', start);
-    playerEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        start();
-      }
     });
   }
 
@@ -563,7 +730,7 @@
       ${row('Environment', dep.env || cfg.nodeEnv || 'local')}
       ${row('Region', dep.region || '—')}
       ${row('Secure cookie setting', cfg.cookieSecure ? 'on' : 'off')}
-      ${db.error ? `<div class="banner banner-warn" style="margin-top:12px">Database error: ${escapeHtml(db.error)}</div>` : ''}
+      ${db.error ? `<div class="banner banner-plain banner-warn" style="margin-top:12px">Database error: ${escapeHtml(db.error)}</div>` : ''}
       ${
         r.hasAdminCookie && r.adminCookieFoundInDatabase === false
           ? `<div class="banner banner-warn" style="margin-top:12px">
@@ -575,7 +742,7 @@
       }
       ${
         !r.hasAdminCookie
-          ? `<div class="banner banner-warn" style="margin-top:12px">
+          ? `<div class="banner banner-plain banner-warn" style="margin-top:12px">
                Your browser is not sending the admin cookie at all. If you are viewing this through a
                link that is NOT the https address (or an embedded preview), open the deployment URL directly.
              </div>`

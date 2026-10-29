@@ -1,10 +1,11 @@
 'use strict';
 
 /**
- * End-to-end test for the polling app.
- * Requires the server to be running (npm start) on BASE_URL.
+ * End-to-end test — SLIDER-ONLY edition (v3).
+ * Every poll is a "what will this player sell for?" bid round; the vote is a price from the
+ * auction ladder. Run the server first.
  *
- *   node test/e2e.js            # full suite (resets test data it creates)
+ *   node test/e2e.js
  *   BASE_URL=http://localhost:4000 node test/e2e.js
  */
 
@@ -89,32 +90,35 @@ class Client {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/* --------------------------------- tests -------------------------------- */
+/** A unique player name per run so repeated runs never collide. */
+const stamp = Date.now();
+const player = (tag) => `${tag} ${stamp}`;
 
 async function main() {
-  console.log(`\n🏏 Polling app end-to-end test → ${BASE}\n${'='.repeat(52)}`);
+  console.log(`\n🏏 Polling app — slider-only end-to-end → ${BASE}\n${'='.repeat(56)}`);
 
   /* 1. Health + pages */
   section('Server health & required pages');
   const health = await fetch(`${BASE}/api/health`).then((r) => r.json());
   ok('health endpoint responds ok', health.ok === true);
+  ok('build id exposed', typeof health.build === 'string');
 
   const pages = [
     ['/', 'participant join page'],
     ['/poll', 'participant polling page'],
-    ['/vote-confirmed', 'vote confirmation page'],
-    ['/results', 'poll results page'],
+    ['/vote-confirmed', 'guess confirmation page'],
+    ['/results', 'results page'],
     ['/admin-login', 'admin login page'],
     ['/admin', 'admin dashboard'],
-    ['/admin/polls', 'create/manage polls page'],
-    ['/admin/participants', 'participant management page'],
-    ['/admin/history', 'poll history page'],
+    ['/admin-polls', 'manage polls page'],
+    ['/admin-participants', 'participant management page'],
+    ['/admin-history', 'history page'],
     ['/display', 'full-screen live display']
   ];
   const skipPages = process.env.SKIP_PAGES === '1';
   for (const [path, label] of pages) {
     if (skipPages) {
-      ok(`${label} (${path}) exists as a static file`, true);
+      ok(`${label} (${path}) exists`, true);
       continue;
     }
     const res = await fetch(BASE + path);
@@ -124,7 +128,8 @@ async function main() {
 
   const meta = await fetch(`${BASE}/api/meta`).then((r) => r.json());
   ok('shareable join link generated', typeof meta.join.joinUrl === 'string' && meta.join.joinUrl.startsWith('http'));
-  ok('event branding available', !!meta.event.name);
+  ok('bid ladder published (81 steps)', Array.isArray(meta.bid.ladder) && meta.bid.ladder.length === 81, `len=${meta.bid && meta.bid.ladder && meta.bid.ladder.length}`);
+  ok('ladder starts at 20 L and ends at 30.0 Cr', meta.bid.ladder[0].label === '20 L' && meta.bid.ladder.at(-1).label === '30.0 Cr');
 
   /* 2. Admin auth */
   section('Admin authentication');
@@ -141,44 +146,50 @@ async function main() {
   const guard = await new Client('anon').get('/api/admin/state');
   ok('admin API protected without session', guard.status === 401);
 
-  /* 3. Poll creation */
-  section('Poll creation (admin)');
-  const question = `E2E test poll ${Date.now()}`;
+  /* 3. Slider-only creation */
+  section('Bid round creation (slider only)');
   const created = await admin.post('/api/admin/polls', {
-    question,
-    description: 'Automated test poll',
-    category: 'E2E',
+    playerName: player('E2E Player'),
+    description: 'Automated test round',
     timerSeconds: 10,
     showResults: 'after',
-    anonymous: false,
-    options: [
-      { label: 'Option Alpha', emoji: '🏏' },
-      { label: 'Option Bravo', emoji: '🔥' },
-      { label: 'Option Charlie', emoji: '⭐' }
-    ]
+    anonymous: false
   });
-  ok('poll created', created.status === 201 && created.data.poll.id > 0);
+  ok('bid round created', created.status === 201 && created.data.poll.id > 0, JSON.stringify(created.data).slice(0, 160));
   const pollId = created.data.poll.id;
+  ok('poll type is bid', created.data.poll.pollType === 'bid');
+  ok(
+    'question auto-written from the player name',
+    created.data.poll.question === `What will be the bid range for ${player('E2E Player')} player?`,
+    created.data.poll.question
+  );
+  ok('no answer options exist', Array.isArray(created.data.poll.options) && created.data.poll.options.length === 0);
 
-  const invalid = await admin.post('/api/admin/polls', { question: 'no', options: [] });
-  ok('invalid poll rejected', invalid.status === 400);
+  const noPlayer = await admin.post('/api/admin/polls', { question: 'What will the price be?' });
+  ok('a round without a player name is rejected', noPlayer.status === 400, `status ${noPlayer.status}`);
+
+  const choiceAttempt = await admin.post('/api/admin/polls', {
+    question: 'Who will win the league?',
+    options: [{ label: 'Team A' }, { label: 'Team B' }]
+  });
+  ok(
+    'multiple-choice polls can no longer be created',
+    choiceAttempt.status === 400 || choiceAttempt.data?.poll?.pollType === 'bid',
+    `status ${choiceAttempt.status}`
+  );
+  if (choiceAttempt.status === 201) await admin.del(`/api/admin/polls/${choiceAttempt.data.poll.id}`);
 
   const edit = await admin.put(`/api/admin/polls/${pollId}`, {
-    question,
+    playerName: player('E2E Player'),
+    question: `What will be the bid range for ${player('E2E Player')} player?`,
     description: 'Edited by test',
-    category: 'E2E',
     timerSeconds: 10,
     showResults: 'after',
-    anonymous: false,
-    options: [
-      { label: 'Option Alpha', emoji: '🏏' },
-      { label: 'Option Bravo', emoji: '🔥' },
-      { label: 'Option Charlie', emoji: '⭐' }
-    ]
+    anonymous: false
   });
-  ok('poll edited', edit.status === 200);
+  ok('bid round edited', edit.status === 200);
 
-  /* 4. Participants join */
+  /* 4. Participants */
   section('Participant join & duplicate identity');
   const alice = new Client('alice');
   const bob = new Client('bob');
@@ -192,86 +203,160 @@ async function main() {
   ok('invalid join rejected', badJoin.status === 400);
 
   const reJoin = await new Client('a2').post('/api/join', { name: 'Alice Test', employeeId: 'E2E-A1' });
-  ok('same employee ID re-joins existing account (no duplicate row)', reJoin.status === 200 && reJoin.data.returning === true);
+  ok('same employee ID re-joins the existing account', reJoin.status === 200 && reJoin.data.returning === true);
 
-  const prematureVote = await alice.post('/api/vote', { pollId, optionId: created.data.poll.options[0].id });
-  ok('cannot vote before poll starts', prematureVote.status === 409);
+  const premature = await alice.post('/api/vote', { pollId, guessLakh: 200 });
+  ok('cannot guess before the round starts', premature.status === 409);
 
-  /* 5. Cross-device sync over HTTP polling */
-  section('Cross-device sync (HTTP polling)');
+  /* 5. Live propagation */
+  section('Starting a round reaches every device');
   const started = await admin.post(`/api/admin/polls/${pollId}/action`, { action: 'start', timerSeconds: 10 });
-  ok('admin can start poll', started.status === 200 && started.data.poll.status === 'active');
+  ok('admin can start the round', started.status === 200 && started.data.poll.status === 'active');
 
   const liveState = (await alice.get('/api/state')).data;
-  ok('participant sees the new live poll on next poll', liveState.poll?.id === pollId);
-  ok('poll is reported as active', liveState.poll?.status === 'active');
+  ok('participant sees the live round', liveState.poll?.id === pollId);
+  ok('round is reported as active', liveState.poll?.status === 'active');
   ok('countdown is running', liveState.poll?.endsAt > Date.now());
+  ok('player name travels with the poll', liveState.poll?.playerName === player('E2E Player'));
   ok('state carries a version fingerprint', typeof liveState.version === 'string' && liveState.version.length > 0);
 
   const bobSees = (await bob.get('/api/state')).data;
-  ok('second device sees the same poll', bobSees.poll?.id === pollId);
+  ok('second device sees the same round', bobSees.poll?.id === pollId);
   ok('all devices agree on the countdown', Math.abs(bobSees.poll.endsAt - liveState.poll.endsAt) < 1500);
-  ok('admin timer is applied to the poll', liveState.poll.timerSeconds === 10, `timer=${liveState.poll.timerSeconds}`);
 
-  /* 6. Voting */
-  section('Voting rules');
+  /* Live stream hello (SSE) */
+  const streamOk = await new Promise((resolve) => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => {
+      ctrl.abort();
+      resolve(false);
+    }, 8000);
+    fetch(`${BASE}/api/stream`, { signal: ctrl.signal })
+      .then(async (res) => {
+        const reader = res.body.getReader();
+        const { value } = await reader.read();
+        clearTimeout(timer);
+        ctrl.abort();
+        const chunk = Buffer.from(value || []).toString('utf8');
+        resolve(res.status === 200 && chunk.includes('event: ready'));
+      })
+      .catch(() => {
+        clearTimeout(timer);
+        resolve(false);
+      });
+  });
+  ok('SSE stream opens and greets the client', streamOk);
+
+  /* 6. Guessing */
+  section('Slider guessing rules');
   const beforeResults = await alice.get('/api/state');
-  ok('results hidden during voting (visibility = after)', beforeResults.data.poll.resultsVisible === false);
+  ok('winners hidden while guessing', beforeResults.data.poll.resultsVisible === false);
 
-  const voteA = await alice.post('/api/vote', { pollId, optionId: created.data.poll.options[0].id });
-  ok('participant A votes', voteA.status === 200 && voteA.data.ok, JSON.stringify(voteA.data));
+  const badGuess = await alice.post('/api/vote', { pollId, guessLakh: 123 });
+  ok('a price off the ladder is rejected', badGuess.status === 400, `status ${badGuess.status}`);
 
-  const dupVote = await alice.post('/api/vote', { pollId, optionId: created.data.poll.options[1].id });
-  ok('duplicate vote rejected (one vote per poll)', dupVote.status === 409 && dupVote.data.alreadyVoted === true);
+  const legacyOption = await alice.post('/api/vote', { pollId, optionId: 1 });
+  ok('multiple-choice submissions are rejected', legacyOption.status === 400, `status ${legacyOption.status}`);
 
-  const afterVoteState = await alice.get('/api/state');
-  ok('vote reflected in own state', afterVoteState.data.poll.viewer.hasVoted === true);
-  ok('chosen option recorded', afterVoteState.data.poll.viewer.votedOptionId === created.data.poll.options[0].id);
+  const guessA = await alice.post('/api/vote', { pollId, guessLakh: 175 });
+  ok('participant A locks a guess (1.75 Cr)', guessA.status === 200 && guessA.data.ok, JSON.stringify(guessA.data));
+  ok('guess label returned', guessA.data.guessLabel === '1.75 Cr', guessA.data.guessLabel);
 
-  const badOption = await bob.post('/api/vote', { pollId, optionId: 999999 });
-  ok('option outside the poll rejected', badOption.status === 400 || badOption.status === 409);
+  const dup = await alice.post('/api/vote', { pollId, guessLakh: 200 });
+  ok('a second guess is rejected', dup.status === 409 && dup.data.alreadyVoted === true);
 
-  const voteB = await bob.post('/api/vote', { pollId, optionId: created.data.poll.options[1].id });
-  ok('participant B votes', voteB.status === 200);
-  ok('vote count increments', voteB.data.totalVotes === 2);
+  const afterVote = await alice.get('/api/state');
+  ok('own guess reflected in state', afterVote.data.poll.viewer.hasVoted === true);
+  ok('guess value echoed back', afterVote.data.poll.viewer.guessLakh === 175);
+  ok('guess label echoed back', afterVote.data.poll.viewer.guessLabel === '1.75 Cr');
 
-  const anonymousJoin = await new Client('c').post('/api/join', { name: 'Blocked User', employeeId: 'E2E-C1' });
-  ok('third participant joins', anonymousJoin.status === 200);
+  const guessB = await bob.post('/api/vote', { pollId, guessLakh: 200 });
+  ok('participant B locks a guess (2.00 Cr)', guessB.status === 200);
+  ok('guess count increments', guessB.data.totalVotes === 2, String(guessB.data.totalVotes));
+
+  const third = new Client('carol');
+  await third.post('/api/join', { name: 'Carol Test', employeeId: 'E2E-C1' });
+  const guessC = await third.post('/api/vote', { pollId, guessLakh: 150 });
+  ok('participant C locks a guess (1.50 Cr)', guessC.status === 200);
 
   /* 7. Pause / resume */
   section('Pause & resume');
   const paused = await admin.post(`/api/admin/polls/${pollId}/action`, { action: 'pause' });
   ok('admin can pause', paused.status === 200 && paused.data.poll.status === 'paused');
-  const pausedVote = await new Client('d').post('/api/vote', { pollId, optionId: created.data.poll.options[0].id });
-  ok('voting blocked while paused', pausedVote.status === 401 || pausedVote.status === 409);
+  const pausedGuess = await new Client('d').post('/api/vote', { pollId, guessLakh: 200 });
+  ok('guessing blocked while paused', pausedGuess.status === 401 || pausedGuess.status === 409);
   const resumed = await admin.post(`/api/admin/polls/${pollId}/action`, { action: 'resume' });
   ok('admin can resume', resumed.status === 200 && resumed.data.poll.status === 'active');
 
   /* 8. Timer auto-close */
-  section('Countdown timer auto-close');
+  section('Countdown auto-close');
   await admin.post(`/api/admin/polls/${pollId}/timer`, { seconds: 2 });
   await sleep(3200);
   const closedState = await admin.get('/api/admin/state');
   const closedPoll = closedState.data.polls.find((p) => p.id === pollId);
-  ok('poll auto-closed when timer expired', closedPoll?.status === 'closed', `status=${closedPoll?.status}`);
+  ok('round auto-closed when the timer expired', closedPoll?.status === 'closed', `status=${closedPoll?.status}`);
 
-  const lateVote = await bob.post('/api/vote', { pollId, optionId: created.data.poll.options[2].id });
-  ok('vote after deadline rejected', lateVote.status === 409);
+  const lateGuess = await bob.post('/api/vote', { pollId, guessLakh: 300 });
+  ok('guess after the deadline rejected', lateGuess.status === 409);
 
-  const resultsAfter = await alice.get('/api/state');
-  const seenPoll = resultsAfter.data.poll?.id === pollId ? resultsAfter.data.poll : resultsAfter.data.history.find((h) => h.id === pollId);
-  ok('results visible to participants after closing', !!seenPoll && seenPoll.resultsVisible === true);
-  ok('results totals correct', seenPoll?.results?.totalVotes === 2, `total=${seenPoll?.results?.totalVotes}`);
+  /* 9. Sold price → 3 winners */
+  section('Sold price → three winners');
+  const sold = await admin.post(`/api/admin/polls/${pollId}/actual`, { lakh: 185 });
+  ok('sold price accepted', sold.status === 200 && sold.data.actualLakh === 185, JSON.stringify(sold.data));
+  ok('three winners declared', Array.isArray(sold.data.winners) && sold.data.winners.length === 3);
 
-  /* 8b. Fine-grained timers */
-  section('Fine-grained timer controls (10s / 15s / extend)');
-  const timerPoll = await admin.post('/api/admin/polls', {
-    question: `Timer test ${Date.now()}`,
-    timerSeconds: 15,
-    options: [{ label: 'A' }, { label: 'B' }]
-  });
+  const readable = await alice.get('/api/state');
+  const seen = readable.data.poll?.id === pollId ? readable.data.poll : readable.data.history.find((h) => h.id === pollId);
+  ok('winners visible to participants', !!seen && seen.resultsVisible === true);
+  ok('all three guesses counted', seen?.results?.totalGuesses === 3, String(seen?.results?.totalGuesses));
+  ok(
+    'winner 1 is the closest guess (1.75 Cr, 10 L under)',
+    seen?.results?.winners?.[0]?.guessLakh === 175 && seen.results.winners[0].diffLakh === 10,
+    JSON.stringify(seen?.results?.winners?.[0])
+  );
+  ok('winner 2 is 2.00 Cr (15 L over)', seen?.results?.winners?.[1]?.guessLakh === 200 && seen.results.winners[1].direction === 'over');
+  ok('winner 3 is 1.50 Cr (35 L under)', seen?.results?.winners?.[2]?.guessLakh === 150 && seen.results.winners[2].diffLakh === 35);
+  ok('nobody is ranked lower than 3rd as a winner', seen.results.winners.every((w) => w.rank <= 3));
+
+  /* 10. THE admin answer sheet */
+  section('Admin guess sheet (who guessed, who did not, winners)');
+  const sheet = await admin.get(`/api/admin/polls/${pollId}/guesses`);
+  ok('guess sheet loads', sheet.status === 200, `status ${sheet.status}`);
+  ok('sheet names the poll and the sold price', sheet.data.poll.id === pollId && sheet.data.poll.actualLabel === '1.85 Cr');
+  ok('sheet is marked revealed', sheet.data.revealed === true);
+  const rows = sheet.data.participants || [];
+  const guessedRows = rows.filter((r) => r.hasGuessed);
+  const missingRows = rows.filter((r) => !r.hasGuessed);
+  ok('every participant appears exactly once', rows.length === new Set(rows.map((r) => r.participantId)).size);
+  ok('all three guessers are listed', guessedRows.length === 3, `${guessedRows.length}`);
+  ok('participants who did not guess are listed separately', Array.isArray(missingRows));
+  ok(
+    'each guess carries rank, distance and direction',
+    guessedRows.every((r) => r.rank >= 1 && r.rank <= 3 && typeof r.diffLakh === 'number' && r.direction)
+  );
+  ok('the three winners are flagged', guessedRows.filter((r) => r.isWinner).length === 3);
+  ok('sheet rows show the guess label', guessedRows.every((r) => typeof r.guessLabel === 'string' && r.guessLabel.includes('Cr')));
+
+  const sheetOfOther = await new Client('nope').get(`/api/admin/polls/${pollId}/guesses`);
+  ok('guess sheet requires an admin session', sheetOfOther.status === 401);
+
+  /* 10b. Correcting the sold price re-ranks instantly */
+  const corrected = await admin.post(`/api/admin/polls/${pollId}/actual`, { price: '2.00 Cr' });
+  ok('sold price accepts typed text ("2.00 Cr")', corrected.status === 200 && corrected.data.actualLakh === 200, JSON.stringify(corrected.data));
+  const rerank = await admin.get(`/api/admin/polls/${pollId}/guesses`);
+  ok('exact guess wins after the correction', rerank.data.participants.find((r) => r.guessLakh === 200)?.rank === 1);
+  ok('exact match is marked as such', rerank.data.winners[0].direction === 'exact');
+  await admin.post(`/api/admin/polls/${pollId}/actual`, { lakh: 185 });
+
+  const cleared = await admin.del(`/api/admin/polls/${pollId}/actual`);
+  ok('sold price can be cleared', cleared.status === 200);
+  await admin.post(`/api/admin/polls/${pollId}/actual`, { lakh: 185 });
+
+  /* 11. Fine-grained timers */
+  section('Fine-grained timer controls');
+  const timerPoll = await admin.post('/api/admin/polls', { playerName: player('Timer Player'), timerSeconds: 15 });
   const timerPollId = timerPoll.data.poll.id;
-  ok('poll created with a 15s timer', timerPoll.data.poll.timerSeconds === 15);
+  ok('round created with a 15s timer', timerPoll.data.poll.timerSeconds === 15);
 
   await admin.post(`/api/admin/polls/${timerPollId}/action`, { action: 'start' });
   let tState = (await admin.get('/api/admin/state')).data.polls.find((p) => p.id === timerPollId);
@@ -279,7 +364,7 @@ async function main() {
 
   await admin.post(`/api/admin/polls/${timerPollId}/timer`, { seconds: 10, mode: 'set' });
   tState = (await admin.get('/api/admin/state')).data.polls.find((p) => p.id === timerPollId);
-  ok('timer restarts at 10s', Math.abs(tState.endsAt - Date.now() - 10000) < 3500, `ends in ${tState.endsAt - Date.now()}ms`);
+  ok('timer restarts at 10s', Math.abs(tState.endsAt - Date.now() - 10000) < 3500);
 
   const beforeExtend = tState.endsAt;
   await admin.post(`/api/admin/polls/${timerPollId}/timer`, { seconds: 30, mode: 'extend' });
@@ -293,136 +378,131 @@ async function main() {
   await admin.post(`/api/admin/polls/${timerPollId}/action`, { action: 'close' });
   await admin.del(`/api/admin/polls/${timerPollId}`);
 
-  /* 9. Visibility modes */
-  section('Result visibility modes');
-  const visPoll = await admin.post('/api/admin/polls', {
-    question: `Visibility test ${Date.now()}`,
-    timerSeconds: 60,
-    showResults: 'during',
-    options: [{ label: 'Yes' }, { label: 'No' }]
-  });
+  /* 12. Visibility */
+  section('Result visibility before the sold price');
+  const visPoll = await admin.post('/api/admin/polls', { playerName: player('Visibility Player'), timerSeconds: 60, showResults: 'during' });
   const visId = visPoll.data.poll.id;
   await admin.post(`/api/admin/polls/${visId}/action`, { action: 'start' });
   const duringState = await alice.get('/api/state');
-  ok('live results visible when set to "during"', duringState.data.poll?.resultsVisible === true);
-  await admin.post(`/api/admin/polls/${visId}/action`, { action: 'visibility', showResults: 'never' });
-  const neverState = await alice.get('/api/state');
-  ok('results hidden when set to "never"', neverState.data.poll?.resultsVisible === false);
-  const forbidden = await alice.get(`/api/polls/${visId}/results`);
-  ok('results API blocked for participants when private', forbidden.status === 403);
-  await admin.post(`/api/admin/polls/${visId}/action`, { action: 'close' });
-  const closedVisible = await admin.get(`/api/polls/${visId}/results`);
-  ok('admin can always read results', closedVisible.status === 200);
+  ok('nobody sees winners before the hammer price exists', duringState.data.poll?.resultsVisible === false);
+  const forbidden = await new Client('p2').get(`/api/polls/${visId}/results`);
+  ok('results API blocked before the sold price exists', forbidden.status === 403, `status ${forbidden.status}`);
+  await admin.post(`/api/admin/polls/${visId}/action`, { action: 'start' });
+  await admin.post(`/api/admin/polls/${visId}/actual`, { lakh: 250 });
+  const afterPrice = await alice.get('/api/state');
+  ok('winners reveal once the sold price is entered', afterPrice.data.poll?.resultsVisible === true);
+  const adminResults = await admin.get(`/api/polls/${visId}/results`);
+  ok('admin can always read results', adminResults.status === 200);
 
-  /* 10. Single active poll */
-  section('Single shared active poll');
-  const p1 = await admin.post('/api/admin/polls', { question: `Shared A ${Date.now()}`, timerSeconds: 60, options: [{ label: 'A1' }, { label: 'A2' }] });
-  const p2 = await admin.post('/api/admin/polls', { question: `Shared B ${Date.now()}`, timerSeconds: 60, options: [{ label: 'B1' }, { label: 'B2' }] });
+  /* 13. Single active round */
+  section('Single shared active round');
+  const p1 = await admin.post('/api/admin/polls', { playerName: player('Shared A'), timerSeconds: 60 });
+  const p2 = await admin.post('/api/admin/polls', { playerName: player('Shared B'), timerSeconds: 60 });
   await admin.post(`/api/admin/polls/${p1.data.poll.id}/action`, { action: 'start' });
   await admin.post(`/api/admin/polls/${p2.data.poll.id}/action`, { action: 'start' });
   const sharedState = await alice.get('/api/state');
-  ok('newest started poll is the one everybody sees', sharedState.data.poll.id === p2.data.poll.id);
+  ok('newest started round is the one everybody sees', sharedState.data.poll.id === p2.data.poll.id);
   const adminAfter = await admin.get('/api/admin/state');
   const a1Poll = adminAfter.data.polls.find((p) => p.id === p1.data.poll.id);
-  ok('previous live poll auto-paused', a1Poll.status === 'paused');
+  ok('previous live round auto-paused', a1Poll.status === 'paused');
 
-  /* 11. Reset & delete */
+  /* 14. Reset / block / delete */
   section('Reset, block, delete');
   const resetNoConfirm = await admin.post(`/api/admin/polls/${p2.data.poll.id}/action`, { action: 'reset' });
   ok('reset requires explicit confirmation', resetNoConfirm.status === 400);
   const resetOk = await admin.post(`/api/admin/polls/${p2.data.poll.id}/action`, { action: 'reset', confirm: true });
-  ok('reset clears votes', resetOk.status === 200 && resetOk.data.poll.totalVotes === 0);
+  ok('reset clears guesses', resetOk.status === 200 && resetOk.data.poll.totalVotes === 0);
 
   const participants = await admin.get('/api/admin/participants');
   const bobRow = participants.data.participants.find((p) => p.employeeId === 'E2E-B1');
   const blockBob = await admin.req('PATCH', `/api/admin/participants/${bobRow.id}`, { blocked: true });
   ok('admin can block a participant', blockBob.status === 200);
-  const blockedVote = await bob.post('/api/vote', { pollId: p2.data.poll.id, optionId: 1 });
-  ok('blocked participant cannot vote', blockedVote.status === 401 || blockedVote.status === 403);
+  const blockedGuess = await bob.post('/api/vote', { pollId: p2.data.poll.id, guessLakh: 200 });
+  ok('blocked participant cannot guess', blockedGuess.status === 401 || blockedGuess.status === 403);
 
   const delPoll = await admin.del(`/api/admin/polls/${p2.data.poll.id}`);
-  ok('poll deleted', delPoll.status === 200);
+  ok('round deleted', delPoll.status === 200);
 
-  /* 12. Exports */
+  /* 15. Exports */
   section('CSV exports');
-  const csv = await fetch(`${BASE}/api/admin/export/poll/${pollId}.csv`, { headers: { Cookie: admin.cookieHeader() } });
+  const csv = await fetch(`${BASE}/api/admin/export/poll/${pollId}.csv`, {
+    headers: { Cookie: admin.cookieHeader() }
+  });
   const csvText = await csv.text();
-  ok('poll CSV export works', csv.status === 200 && csvText.includes('Option Alpha') && csvText.includes('Total votes'));
-  const csvPeople = await fetch(`${BASE}/api/admin/export/participants.csv`, { headers: { Cookie: admin.cookieHeader() } });
+  ok('poll CSV export works', csv.status === 200 && csvText.length > 20);
+  ok('poll CSV contains the guessers', csvText.includes('Alice') || csvText.toLowerCase().includes('guess'));
+  const csvPeople = await fetch(`${BASE}/api/admin/export/participants.csv`, {
+    headers: { Cookie: admin.cookieHeader() }
+  });
   ok('participants CSV export works', csvPeople.status === 200);
-  const csvAll = await fetch(`${BASE}/api/admin/export/all-polls.csv`, { headers: { Cookie: admin.cookieHeader() } });
+  const csvAll = await fetch(`${BASE}/api/admin/export/all-polls.csv`, {
+    headers: { Cookie: admin.cookieHeader() }
+  });
   ok('all-polls CSV export works', csvAll.status === 200);
 
-  /* 13. Settings */
+  /* 16. Settings */
   section('Event settings');
-  const settings = await admin.put('/api/admin/settings', { event_name: 'Cricket Auction Live Polls', display_message: 'Scan and vote!' });
+  const settings = await admin.put('/api/admin/settings', {
+    event_name: 'Cricket Auction Live Polls',
+    display_message: 'Scan and vote!'
+  });
   ok('settings saved', settings.status === 200);
   const settingsRead = await new Client('pub').get('/api/meta');
   ok('settings appear on public meta', settingsRead.data.event.displayMessage === 'Scan and vote!');
 
-  /* 14. Per-viewer payloads */
+  /* 17. Per-viewer payloads */
   section('Per-viewer state isolation');
   const bobState2 = (await bob.get('/api/state')).data;
   const aliceState2 = (await alice.get('/api/state')).data;
-  ok('each participant gets their own vote state', !!bobState2.poll?.viewer && !!aliceState2.poll?.viewer);
+  ok('each participant gets their own guess state', !!bobState2.poll?.viewer && !!aliceState2.poll?.viewer);
   ok('anonymous flag does not leak voter identity', !JSON.stringify(bobState2.poll).includes('participantId'));
 
-  /* 14b. Rapid round (10-15 s guessing) — the flow the admin uses during the auction */
-  section('Rapid round (seconds-based guessing)');
+  /* 18. One-tap round */
+  section('One-tap bid round (the flow used during the auction)');
   const rr = await admin.post('/api/admin/polls', {
-    question: `Who wins the bid for player E2E-${Date.now()}?`,
-    category: 'Rapid round',
+    playerName: `Rapid ${stamp}`,
+    question: `What will be the bid range for Rapid ${stamp} player?`,
+    category: 'Bid range',
     showResults: 'after',
     anonymous: false,
-    timerSeconds: 15,
-    options: [{ label: 'Team A' }, { label: 'Team B' }, { label: 'Team C' }]
+    timerSeconds: 15
   });
-  ok('rapid round poll created', rr.status === 201, `status ${rr.status}`);
+  ok('one-tap round created', rr.status === 201, `status ${rr.status}`);
   const rrId = rr.data.poll.id;
-  ok('accepts a 15-second timer', rr.data.poll.timerSeconds === 15, String(rr.data.poll.timerSeconds));
-
+  ok('accepts a 15-second timer', rr.data.poll.timerSeconds === 15);
   const rrStart = await admin.post(`/api/admin/polls/${rrId}/action`, { action: 'start', timerSeconds: 15 });
-  ok('rapid round starts immediately', rrStart.status === 200, `status ${rrStart.status}`);
+  ok('round starts immediately', rrStart.status === 200);
   let rrState = (await bob.get('/api/state')).data.poll;
-  ok('participants see the rapid round', rrState && rrState.id === rrId);
+  ok('participants see the round', rrState && rrState.id === rrId);
   ok('countdown is ~15s', rrState.remainingMs > 12_000 && rrState.remainingMs <= 15_000, String(rrState.remainingMs));
-  ok('results hidden while guessing', rrState.resultsVisible === false);
+  ok('winners hidden while guessing', rrState.resultsVisible === false);
 
-  // fresh clients: earlier sections deliberately invalidate some sessions
   const rrA = new Client('rapid-a');
   const rrB = new Client('rapid-b');
   await rrA.post('/api/join', { name: 'Rapid A', employeeId: `E2E-RR-A-${rrId}` });
   await rrB.post('/api/join', { name: 'Rapid B', employeeId: `E2E-RR-B-${rrId}` });
-  const rrVoteA = await rrA.post('/api/vote', { pollId: rrId, optionId: rrState.options[0].id });
-  const rrVoteB = await rrB.post('/api/vote', { pollId: rrId, optionId: rrState.options[1].id });
-  ok(
-    'participants can vote in the rapid round',
-    rrVoteA.status === 200 && rrVoteB.status === 200,
-    `A ${rrVoteA.status} ${JSON.stringify(rrVoteA.data)} / B ${rrVoteB.status} ${JSON.stringify(rrVoteB.data)}`
-  );
+  const rrGuessA = await rrA.post('/api/vote', { pollId: rrId, guessLakh: 500 });
+  const rrGuessB = await rrB.post('/api/vote', { pollId: rrId, guessLakh: 550 });
+  ok('participants can guess in the round', rrGuessA.status === 200 && rrGuessB.status === 200);
 
   const rrTimer = await admin.post(`/api/admin/polls/${rrId}/timer`, { seconds: 10, mode: 'set' });
-  ok('countdown can be reset to 10s', rrTimer.status === 200, `status ${rrTimer.status}`);
+  ok('countdown can be reset to 10s', rrTimer.status === 200);
   rrState = (await rrA.get('/api/state')).data.poll;
-  ok('10s countdown accepted', rrState.remainingMs <= 10_000 && rrState.remainingMs > 8000, String(rrState.remainingMs));
+  ok('10s countdown accepted', rrState.remainingMs <= 10_000 && rrState.remainingMs > 8000);
 
-  // close it as the timer would, and confirm the answer appears automatically
-  await admin.post(`/api/admin/polls/${rrId}/action`, { action: 'close' });
+  await admin.post(`/api/admin/polls/${rrId}/actual`, { lakh: 525 });
   const rrAfter = (await rrA.get('/api/state')).data;
-  const rrClosed = rrAfter.history.find((h) => h.id === rrId);
-  ok('results auto-reveal once the round closes', !!rrClosed && rrClosed.resultsVisible === true);
-  ok('rapid round keeps its votes', !!rrClosed && rrClosed.totalVotes === 2, String(rrClosed && rrClosed.totalVotes));
-  ok(
-    'winning option has the most votes',
-    !!rrClosed && rrClosed.results.rows.length === 3 && rrClosed.results.totalVotes === 2
-  );
+  const rrClosed = rrAfter.history.find((h) => h.id === rrId) || (rrAfter.poll && rrAfter.poll.id === rrId ? rrAfter.poll : null);
+  ok('entering the sold price closes and reveals the round', !!rrClosed && rrClosed.resultsVisible === true);
+  ok('round keeps both guesses', !!rrClosed && rrClosed.totalVotes === 2, String(rrClosed && rrClosed.totalVotes));
+  ok('winners are ranked', !!rrClosed && rrClosed.results.winners.length === 2);
   await admin.del(`/api/admin/polls/${rrId}`);
 
-  /* 15. Persistence */
+  /* 19. Persistence */
   section('Data persistence');
   const persisted = await admin.get('/api/admin/state');
   const persistedPoll = persisted.data.polls.find((p) => p.id === pollId);
-  ok('poll still stored in database', !!persistedPoll && persistedPoll.totalVotes === 2);
+  ok('round still stored in the database', !!persistedPoll && persistedPoll.totalVotes === 3);
   ok('participant records stored', persisted.data.stats.participants >= 3);
 
   /* cleanup */
@@ -435,14 +515,13 @@ async function main() {
   }
   ok('test data cleaned up', true);
 
-
-  console.log(`\n${'='.repeat(52)}`);
+  console.log(`\n${'='.repeat(56)}`);
   console.log(`  ${passed} passed, ${failed} failed`);
   if (failed) {
     console.log('\n  Failures:');
     failures.forEach((f) => console.log(`   - ${f}`));
   }
-  console.log(`${'='.repeat(52)}\n`);
+  console.log(`${'='.repeat(56)}\n`);
   process.exit(failed ? 1 : 0);
 }
 

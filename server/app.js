@@ -239,7 +239,8 @@ const PAGES = {
   '/admin': 'admin.html',
   '/admin/polls': 'admin-polls.html',
   '/admin/participants': 'admin-participants.html',
-  '/admin/history': 'admin-history.html'
+  '/admin/history': 'admin-history.html',
+  '/admin/players': 'admin-players.html'
 };
 for (const [route, file] of Object.entries(PAGES)) {
   app.get(route, (req, res) => res.sendFile(path.join(PUBLIC_DIR, file)));

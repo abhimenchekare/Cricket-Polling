@@ -33,6 +33,10 @@
     {
       "source": "/admin/history",
       "destination": "/admin-history"
+    },
+    {
+      "source": "/admin/players",
+      "destination": "/admin-players"
     }
   ],
   "headers": [

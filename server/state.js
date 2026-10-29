@@ -423,7 +423,12 @@ const PUBLIC_STATE_SQL = `
   WITH core AS (
     SELECT (SELECT COALESCE(json_object_agg(key, value), '{}'::json) FROM settings) AS settings,
            (SELECT COUNT(*)::int FROM participants) AS participants,
-           (SELECT COUNT(*)::int FROM participants WHERE last_seen_at > $1) AS online
+           (SELECT COUNT(*)::int FROM participants WHERE last_seen_at > $1) AS online,
+           (SELECT COUNT(*)::int FROM auction_players) AS roster_total,
+           (SELECT COUNT(*)::int FROM auction_players WHERE status = 'sold') AS roster_sold,
+           (SELECT COALESCE(SUM(sold_lakh), 0)::int FROM auction_players WHERE status = 'sold') AS roster_spent,
+           (SELECT name FROM auction_players WHERE status = 'queued'
+             ORDER BY position ASC, id ASC LIMIT 1) AS up_next
   )
   SELECT (SELECT row_to_json(core) FROM core) AS core,
          (SELECT COALESCE(json_agg(r), '[]'::json) FROM (${LIVE_AND_HISTORY}) r) AS rows,
@@ -440,7 +445,8 @@ const FINGERPRINT_SQL = `
     (SELECT COUNT(*)::text FROM participants),
     (SELECT COALESCE(sum(COALESCE(actual_lakh, 0)), 0)::text FROM polls),
     (SELECT COALESCE(string_agg(key || '=' || value, ',' ORDER BY key), '') FROM settings),
-    (SELECT COALESCE(max(last_seen_at), 0)::text FROM participants)
+    (SELECT COALESCE(max(last_seen_at), 0)::text FROM participants),
+    (SELECT COALESCE(string_agg(status, '' ORDER BY position, id), '') FROM auction_players)
   )) AS fingerprint`;
 
 async function stateFingerprint() {
@@ -501,6 +507,13 @@ function assemblePublicState(row, participantId = null) {
       online: Number(core.online || 0),
       votesOnCurrent: serialized ? serialized.totalVotes : 0
     },
+    auction: {
+      rosterTotal: Number(core.roster_total || 0),
+      sold: Number(core.roster_sold || 0),
+      spentLakh: Number(core.roster_spent || 0),
+      spentLabel: core.roster_spent ? ladder.label(Number(core.roster_spent)) : null,
+      upNext: core.up_next || null
+    },
     poll: serialized,
     pollContext: kind,
     history
@@ -530,7 +543,7 @@ async function buildAdminState() {
   await sweepExpiredPolls();
 
   // One parallel round-trip for everything (was one query per poll, ~40 round-trips).
-  const [pollRows, core, bulk, activity] = await Promise.all([
+  const [pollRows, core, bulk, activity, roster] = await Promise.all([
     q(`${POLL_SELECT} ORDER BY p.id DESC`),
     one(`SELECT (SELECT COALESCE(json_object_agg(key, value), '{}'::json) FROM settings) AS settings,
                 (SELECT COUNT(*)::int FROM participants) AS participants,
@@ -539,7 +552,11 @@ async function buildAdminState() {
                 (SELECT COUNT(*)::int FROM votes) AS total_votes`,
       [Date.now() - 2 * 60 * 1000]),
     one(bulkSql(ALL_IDS), [null]),
-    q('SELECT id, actor, action, detail, created_at FROM activity_log ORDER BY id DESC LIMIT 25')
+    q('SELECT id, actor, action, detail, created_at FROM activity_log ORDER BY id DESC LIMIT 25'),
+    q(
+      `SELECT p.*, (SELECT COUNT(*)::int FROM votes v WHERE v.poll_id = p.poll_id) AS guess_count
+         FROM auction_players p ORDER BY p.position ASC, p.id ASC`
+    )
   ]);
 
   const ctx = indexBulk(bulk);
@@ -609,7 +626,31 @@ async function buildAdminState() {
       closedPolls: polls.filter((p) => p.status === 'closed').length,
       draftPolls: polls.filter((p) => p.status === 'draft').length
     },
-    recentActivity: activity.map((a) => ({ ...a, created_at: Number(a.created_at) }))
+    recentActivity: activity.map((a) => ({ ...a, created_at: Number(a.created_at) })),
+    auction: {
+      players: roster.map((r) => ({
+        id: r.id,
+        name: r.name,
+        role: r.role,
+        baseLakh: r.base_lakh == null ? null : Number(r.base_lakh),
+        baseLabel: r.base_lakh == null ? null : ladder.label(Number(r.base_lakh)),
+        position: Number(r.position),
+        status: r.status,
+        pollId: r.poll_id,
+        soldLakh: r.sold_lakh == null ? null : Number(r.sold_lakh),
+        soldLabel: r.sold_lakh == null ? null : ladder.label(Number(r.sold_lakh)),
+        guessCount: Number(r.guess_count || 0)
+      })),
+      onBlock: roster.find((r) => r.status === 'on_block') || null,
+      upNext: roster.filter((r) => r.status === 'queued').slice(0, 5),
+      counts: {
+        total: roster.length,
+        queued: roster.filter((r) => r.status === 'queued').length,
+        onBlock: roster.filter((r) => r.status === 'on_block').length,
+        sold: roster.filter((r) => r.status === 'sold').length,
+        unsold: roster.filter((r) => r.status === 'unsold').length
+      }
+    }
   };
 }
 

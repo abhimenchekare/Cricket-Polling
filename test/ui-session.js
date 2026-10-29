@@ -38,7 +38,7 @@ const ok = (name, cond, extra = '') => {
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   page.on('console', (m) => {
-    if (m.type() === 'error' && !/status of 40[13]/.test(m.text())) errors.push('console: ' + m.text());
+    if (m.type() === 'error' && !/status of 40[13]|navigator\.vibrate/.test(m.text())) errors.push('console: ' + m.text());
   });
 
   console.log('\n🔐 Sign in');

@@ -350,12 +350,14 @@
   }
 
   function haptic(ms = 12) {
-    if (navigator.vibrate) {
-      try {
-        navigator.vibrate(ms);
-      } catch {
-        /* ignore */
-      }
+    // Phones ignore vibrate() until the page has been touched at least once; asking earlier
+    // only produces a console warning, so wait for real user activation.
+    const active = navigator.userActivation ? navigator.userActivation.hasBeenActive : true;
+    if (!active || !navigator.vibrate) return;
+    try {
+      navigator.vibrate(ms);
+    } catch {
+      /* ignore */
     }
   }
 
