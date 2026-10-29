@@ -85,6 +85,7 @@
   async function paintBuild() {
     try {
       const h = await API.get('/api/health');
+      window.App.watchForNewBuild({ intervalMs: 60000 });
       document.querySelectorAll('[data-build]').forEach((el) => {
         el.textContent = `build ${h.build || '?'}${h.features && h.features.adminTokenHeader ? ' · token-auth' : ''}`;
         el.title = 'If this does not match the version you just deployed, the deployment is stale.';

@@ -28,6 +28,8 @@
   }
 
   /* ------------------------------ bootstrap ------------------------------ */
+  // Tell the phone when a newer deployment is live (banner, never an auto-reload).
+  if (window.App.watchForNewBuild) window.App.watchForNewBuild({ intervalMs: 90000 });
 
   async function init() {
     try {

@@ -368,6 +368,87 @@ warm — wait a minute or trigger one more redeploy.
 
 ---
 
+## "I pushed but the website didn't change" — 20-second diagnosis
+
+Two very different problems look identical. One test separates them.
+
+### Test A — is the new code actually on GitHub?
+
+Open this in a browser (replace `<user>` and `<repo>`):
+
+```
+https://raw.githubusercontent.com/<user>/<repo>/main/public/js/poll.js
+```
+
+Use **Ctrl/Cmd + F** and search for **`bid-range`**.
+
+| Result | Meaning | Fix |
+| --- | --- | --- |
+| **Not found** | Your commit never landed on `main`. | See *Push went to the wrong place* below. |
+| **Found** | GitHub is correct — Vercel simply didn't build/deploy it. | See *Vercel didn't deploy* below. |
+
+Repeat for `server/bidladder.js` (should be readable, not "404: Not Found") — a 404 there means the
+`server/` folder wasn't uploaded at all, which also means the file list you uploaded was incomplete.
+
+### Push went to the wrong place
+
+The three ways this happens, in order of likelihood:
+
+1. **You committed to a branch, not `main`.** When using *Add file → Upload files* or the web editor,
+   GitHub sometimes offers **"Create a new branch for this commit and start a pull request"**. A PR
+   branch gets a **Preview** deployment only — the production domain keeps the old build forever.
+   Fix: open the PR → **Merge pull request**, or switch the file view to `main` and verify the change.
+2. **Vercel watches a different branch.** Vercel → **Settings → Git → Production Branch** must be
+   `main` (or whatever you actually push to).
+3. **Two repositories, same name.** You pushed to a fork/repo that this Vercel project isn't linked to.
+   Vercel → **Settings → Git → Connected Git Repository** shows the real one — compare the owner/name.
+
+### Vercel didn't deploy
+
+Vercel → **Deployments**. Look at the top entry:
+
+| What you see | Meaning |
+| --- | --- |
+| No deployment with your latest commit message | The push never triggered a build — wrong branch/repo (above). |
+| A deployment labelled **Preview**, not **Production** | You pushed to a branch. Merge it, or hit **⋯ → Promote to Production**. |
+| A deployment labelled **Error** | Open **Build Logs** — the fix is in the last red line. |
+| A **Ready** Production deployment that is still old | Check *Settings → Git* (branch/repo) and that the domain isn't attached to a **different project** (Settings → Domains). |
+| Ready + new commit, but the site looks old | Browser cache. **Ctrl/Cmd + Shift + R**. Version 2.2.0 stamps assets with `?v=2.2.0`, so this stops being possible once it's live. |
+
+### The guaranteed path — skip GitHub entirely
+
+If the web upload keeps half-landing, deploy from your machine once. This uploads the files exactly
+as they are on disk:
+
+```bash
+npm install -g vercel
+cd cricket-polling-vercel      # folder containing vercel.json, api/, public/
+vercel login
+vercel link                    # Link to existing project → your project
+vercel --prod                  # builds AND promotes to production
+```
+
+`vercel link` is the step people skip — without it you create a second project with its own URL (and
+no database), which looks exactly like "nothing changed".
+
+### Then confirm (this is the only proof that matters)
+
+```bash
+curl https://YOUR-APP.vercel.app/api/health
+```
+
+It must contain:
+
+```json
+"build": "2.2.0+<7-char-commit>",
+"features": { "adminTokenHeader": true, "diagnostics": true, "rapidRound": true, "sessionRetry": true }
+```
+
+Anything else = the deployment is still old. Paste that output and the Deployments list in the chat and
+the cause will be obvious.
+
+---
+
 ## Shipping an update — and proving it actually went live
 
 Nine times out of ten, "the fix didn't work" means the browser is running an **older deployment**.

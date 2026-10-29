@@ -242,6 +242,28 @@ no floating-point rounding can ever make two different guesses look equal.
 
 ---
 
+## 5a. "I deployed but my browser shows the old site"
+
+Since 2.2.1 the app tells you when a newer deployment exists: an in-page banner
+**"A newer version (x.y.z) is deployed — Reload"** appears within a minute on any open admin or
+participant tab. Nothing reloads by itself (that would be dangerous mid-auction).
+
+Before that, the usual causes are, in order:
+
+1. **The phone/tab has a cached page from the previous deployment.** Hard reload
+   (**Ctrl/Cmd + Shift + R**) or open the site in a private tab. On Android Chrome: menu → History →
+   Clear browsing data → Cached images and files. On iPhone Safari: Settings → Safari → Clear History
+   and Website Data.
+2. **You are looking at a different URL.** Production is `https://<project>.vercel.app`. URLs of the
+   form `<project>-<hash>-<team>.vercel.app` are *deployment* links and
+   `<project>-git-<branch>-<team>.vercel.app` are *preview* links — those can be older, and the git
+   ones are SSO-protected.
+3. **The deploy never happened.** `curl https://<project>.vercel.app/api/health` — no `build` field
+   means old code. See `DEPLOY-STEP-BY-STEP.md`.
+
+Check what your browser *actually* has by opening the dashboard: the sidebar shows
+`build 2.2.1 · token-auth`. If that line is missing, your browser is on pre-2.1 code.
+
 ## 5b. Is my deployment current?
 
 The current build is **2.1.0**. Verify with any of:
