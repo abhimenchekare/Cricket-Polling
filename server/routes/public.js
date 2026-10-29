@@ -295,8 +295,7 @@ router.post('/vote', async (req, res, next) => {
       return res.status(400).json({ error: 'Invalid vote request' });
     }
 
-    await state.sweepExpiredPolls(); // close the poll first if the timer has run out
-
+    /* One round trip on the hot path: read the poll, and only sweep when its timer actually ran out. */
     const poll = await one('SELECT * FROM polls WHERE id = $1', [pollId]);
     if (!poll) return res.status(404).json({ error: 'That poll no longer exists' });
     if (poll.status !== 'active') {
@@ -323,41 +322,43 @@ router.post('/vote', async (req, res, next) => {
       });
     }
 
-    const already = await one(
-      'SELECT option_id, guess_lakh FROM votes WHERE poll_id = $1 AND participant_id = $2',
-      [pollId, req.participant.id]
+    /* A guess is one INSERT ... ON CONFLICT DO NOTHING, then one statement that bumps the poll
+       revision and counts the guesses. Two round trips instead of four — this is the button the
+       audience presses 100 times an hour. */
+    const inserted = await one(
+      `INSERT INTO votes (poll_id, option_id, participant_id, guess_lakh, created_at)
+       VALUES ($1, NULL, $2, $3, $4)
+       ON CONFLICT ON CONSTRAINT votes_one_per_participant DO NOTHING
+       RETURNING id`,
+      [pollId, req.participant.id, guessLakh, Date.now()]
     );
-    if (already) {
+    if (!inserted) {
+      const already = await one(
+        'SELECT guess_lakh FROM votes WHERE poll_id = $1 AND participant_id = $2',
+        [pollId, req.participant.id]
+      );
       return res.status(409).json({
         error: 'You already locked a guess for this player',
         alreadyVoted: true,
         optionId: null,
         optionLabel: null,
-        guessLakh: already.guess_lakh == null ? null : Number(already.guess_lakh),
-        guessLabel: already.guess_lakh == null ? null : ladder.label(already.guess_lakh)
+        guessLakh: already && already.guess_lakh != null ? Number(already.guess_lakh) : null,
+        guessLabel: already && already.guess_lakh != null ? ladder.label(already.guess_lakh) : null
       });
     }
 
+    let total = 1;
     try {
-      await q(
-        'INSERT INTO votes (poll_id, option_id, participant_id, guess_lakh, created_at) VALUES ($1, NULL, $2, $3, $4)',
-        [pollId, req.participant.id, guessLakh, Date.now()]
+      const bumped = await one(
+        `UPDATE polls SET updated_at = $2, revision = revision + 1
+          WHERE id = $1
+          RETURNING (SELECT COUNT(*)::int FROM votes WHERE poll_id = $1) AS total`,
+        [pollId, Date.now()]
       );
-    } catch (err) {
-      if (err.code === '23505' || err.code === '23P01' || /duplicate key|unique/i.test(err.message)) {
-        return res.status(409).json({ error: 'You have already voted in this poll', alreadyVoted: true });
-      }
-      throw err;
+      if (bumped && bumped.total != null) total = Number(bumped.total);
+    } catch {
+      /* the guess is already stored — a counter failure must never fail the submission */
     }
-
-    await q('UPDATE polls SET updated_at = $1, revision = revision + 1 WHERE id = $2', [
-      Date.now(),
-      pollId
-    ]);
-
-    const total = Number(
-      (await one('SELECT COUNT(*)::int AS c FROM votes WHERE poll_id = $1', [pollId])).c
-    );
 
     res.json({
       ok: true,

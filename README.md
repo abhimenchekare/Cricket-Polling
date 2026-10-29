@@ -12,7 +12,7 @@ A complete live polling website for your office cricket auction, built to run **
 
 ---
 
-## What this app does (v3.2.0 — auction list + SHOUT)
+## What this app does (v3.2.1 — auction list + SHOUT)
 
 An office-cricket-auction companion for the audience's phones.
 
@@ -223,6 +223,32 @@ returns to the auction page by itself after ~1.2 s, so nobody is stranded off th
 player is shouted. There is a `Stay here` button if someone wants to read it first.
 
 Countdowns under a minute show as plain seconds (`15s`, `8s`); longer ones stay `mm:ss`.
+
+## 4b-bis. ⚡ The Lock-in button answers in ~100 ms (v3.2.1)
+
+The complaint: *"when they select bid submit, it takes 3-4 seconds."* Three separate delays were
+stacked on top of each other, and none of them were the database.
+
+| Cause | What it cost | Fix |
+| --- | --- | --- |
+| A deliberate `setTimeout(..., 650)` before navigating | 650 ms, every single tap | removed — the confirmation page *is* the celebration |
+| The confirmation page waited for `/api/meta` **then** `/api/state` before painting anything | 2 serverless calls — 1–3 s on a cold function | it paints from the just-submitted result immediately, then refreshes quietly in the background |
+| The vote endpoint did 6 database round trips | tens of ms here, more on Neon | 4 now: `INSERT … ON CONFLICT DO NOTHING` (which also removes the duplicate-vote race) plus one statement that bumps the poll and counts the guesses |
+
+Measured on the same test harness that ships with the app (`npm run test:vote-speed`):
+
+| | tap → server answers | tap → "Guess locked in!" on screen |
+| --- | --- | --- |
+| Before | 69 ms | **786 ms** |
+| After, warm | 50 ms | **118 ms** |
+| After, with every `/api` call delayed 800 ms (cold function) | 49 ms | **124 ms** |
+
+That last row is the point: on a cold Vercel function the screen no longer waits for the network at
+all. The test enforces it — if a future change reintroduces a blocking call on that page, `ui` and
+`vote-speed` fail.
+
+The confirmation document itself is also prefetched while the round is open, so the tap has nothing
+left to download.
 
 ## 4c. Admin panel bouncing to the login page — fixed
 
@@ -582,9 +608,10 @@ npm run test:live                  # push latency + polling fallback
 npm run test:routes                # every page + API route on the deployment
 npm run test:config                # vercel.json / rewrite / no-socket checks
 npm run test:perf                  # perceived load speed
+npm run test:vote-speed            # Lock-in latency (cold-function simulation)
 ```
 
-**Current results (local, v3.2.0), all with zero failures:**
+**Current results (local, v3.2.1), all with zero failures:**
 
 | Suite | Checks | What it proves |
 | --- | --- | --- |
@@ -593,6 +620,7 @@ npm run test:perf                  # perceived load speed
 | **`shout`** | **34** | paste → order → SHOUT → splash on the phone → sold price → SOLD → next SHOUT, plus undo/skip/guards |
 | `ui` | 32 | join, dashboard, projector, mobile layouts, auto-return from the confirmation |
 | `ui-bid` | 28 | the full slider round on an iPhone 13, incl. the bounce back to the poll |
+| **`vote-speed`** | **7** | Lock-in latency, measured warm **and** with every API call delayed 800 ms |
 | `ui-rapid` | 18 | 10s…2 min presets, remembered across reloads, used by the next SHOUT |
 | `ui-session` | 30 | admin sign-in/session/logout |
 | `live` | 10 | start→phone 276 ms, vote→projector 123 ms, price→winners 244 ms, fallback polling |
@@ -677,4 +705,4 @@ role and base price, and the price you type when the hammer falls. That is all i
 
 ---
 
-*Cricket Auction Live Polling — v3.2.0 · Express + Postgres on Vercel · separate from the auction website.*
+*Cricket Auction Live Polling — v3.2.1 · Express + Postgres on Vercel · separate from the auction website.*

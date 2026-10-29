@@ -19,7 +19,7 @@
       <p class="muted" style="font-size:14.5px;margin-top:8px">You have not voted in the current poll.</p>`;
   }
 
-  async function render(state) {
+  async function render(state, opts = {}) {
     let poll = state.poll;
     // Prefer the poll mentioned in the URL (e.g. a poll that just closed)
     if (wantedPollId) {
@@ -82,8 +82,10 @@
           : 'Results will appear automatically once the host reveals them.';
     }
 
-    confetti(1600);
-    scheduleReturn();
+    if (!opts.silent) {
+      confetti(1600);
+      scheduleReturn();
+    }
   }
 
   /* "Guess locked in" is a confirmation, not a place to wait. Hand the phone back to the
@@ -126,7 +128,54 @@
     window.location.replace('/poll');
   }
 
-  async function load() {
+  /* Paint the confirmation straight away from what the poll page already knows,
+     then let the network catch up in the background. On a cold serverless function the two
+     API calls used to cost 2-3 seconds of staring at a blank screen. */
+  function renderFromCache() {
+    let cached;
+    try {
+      cached = JSON.parse(sessionStorage.getItem('last_vote') || 'null');
+    } catch {
+      cached = null;
+    }
+    if (!cached) return false;
+    if (Date.now() - Number(cached.at || 0) > 120000) return false;
+    if (wantedPollId && Number(cached.pollId) !== wantedPollId) return false;
+
+    const titleEl = document.querySelector('.confirm-title');
+    if (titleEl) titleEl.textContent = 'Guess locked in!';
+    const subEl = document.querySelector('.confirm-title + p');
+    if (subEl) subEl.textContent = 'Closest guess to the sold price wins. Sit tight.';
+
+    choiceEl.innerHTML = `
+      <div style="margin-top:14px" class="mute-sm">Your guess</div>
+      <div class="bid-locked-value pop" style="margin-top:6px">${escapeHtml(String(cached.guessLabel || ''))}</div>
+      ${cached.playerName ? `<div class="bid-player" style="margin-top:12px"><span class="bid-player-tag">PLAYER</span>${escapeHtml(cached.playerName)}</div>` : ''}
+      ${cached.question ? `<p class="muted" style="margin-top:14px;font-size:13.5px">“${escapeHtml(cached.question)}”</p>` : ''}`;
+
+    statsEl.innerHTML = `
+      <div class="stat"><div class="stat-value">${Number(cached.totalVotes || 0)}</div><div class="stat-label">Guesses on this round</div></div>
+      <div class="stat"><div class="stat-value">Live</div><div class="stat-label">Poll status</div></div>`;
+
+    noteEl.textContent = 'Results will appear automatically once the host reveals them.';
+    resultsLink.textContent = 'Back to the auction';
+    resultsLink.href = '/poll';
+
+    window.requestAnimationFrame(() => {
+      confetti(1400);
+      scheduleReturn();
+    });
+    return true;
+  }
+
+  let paintedFromCache = false;
+
+  function load() {
+    paintedFromCache = renderFromCache();
+    hydrate();
+  }
+
+  async function hydrate() {
     try {
       const meta = await API.get('/api/meta');
       if (!meta.viewer.joined) {
@@ -135,12 +184,28 @@
       }
       document.querySelectorAll('[data-event-name]').forEach((el) => (el.textContent = meta.event.name));
       document.querySelectorAll('[data-event-tagline]').forEach((el) => (el.textContent = meta.event.tagline || ''));
-      render(await API.get('/api/state'));
+      const payload = await API.get('/api/state');
+
+      /* If we already painted from the local copy, only replace it when the server actually has
+         a guess to show — a lagging snapshot must never wipe the "locked in" screen. */
+      if (paintedFromCache) {
+        const p =
+          payload && payload.poll && Number(payload.poll.id) === Number(wantedPollId || payload.poll.id)
+            ? payload.poll
+            : payload && payload.poll;
+        const hasGuess = p && (p.viewer?.guessLakh != null || p.myGuess?.lakh != null);
+        if (!hasGuess) return;
+      }
+      paintedFromCache = false;
+      render(payload, { silent: true });
     } catch {
-      window.App.toast('Could not load your confirmation', 'err');
+      if (!document.getElementById('confirm-return')) {
+        window.App.toast('Could not load your confirmation', 'err');
+      }
     }
   }
 
   load();
-  setInterval(load, 20000);
+  // after the first paint, keep it fresh without ever blocking the screen
+  setInterval(() => hydrate(), 20000);
 })();

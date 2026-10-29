@@ -321,7 +321,23 @@
     return `${Number.isInteger(cr) ? cr.toFixed(2) : cr} Cr`;
   }
 
+  /* Warm the confirmation document while the round is open, so the tap has nothing to download. */
+  function prefetchConfirm(pollId) {
+    try {
+      if (!pollId || document.querySelector('link[data-confirm-prefetch]')) return;
+      const link = document.createElement('link');
+      link.rel = 'prefetch';
+      link.as = 'document';
+      link.href = `/vote-confirmed?poll=${pollId}`;
+      link.setAttribute('data-confirm-prefetch', '1');
+      document.head.appendChild(link);
+    } catch {
+      /* prefetch is a nicety */
+    }
+  }
+
   function wireBid(poll, startIndex) {
+    prefetchConfirm(poll.id);
     const range = document.getElementById('bid-range');
     const valueEl = document.getElementById('bid-value');
     const labelEl = document.getElementById('bid-btn-label');
@@ -377,11 +393,26 @@
       try {
         const res = await API.post('/api/vote', { pollId: poll.id, guessLakh: step.lakh });
         haptic(40);
-        window.App.confetti(1600);
-        toast(`Locked in at ${res.guessLabel}`, 'ok');
-        setTimeout(() => {
-          window.location.href = `/vote-confirmed?poll=${res.pollId}`;
-        }, 650);
+        /* Hand the confirmation everything it needs so the next page paints with no API call. */
+        try {
+          sessionStorage.setItem(
+            'last_vote',
+            JSON.stringify({
+              at: Date.now(),
+              pollId: res.pollId,
+              guessLakh: res.guessLakh,
+              guessLabel: res.guessLabel,
+              playerName: poll.playerName || null,
+              question: res.question || poll.question,
+              totalVotes: res.totalVotes,
+              status: poll.status
+            })
+          );
+        } catch {
+          /* private mode — the confirmation page falls back to fetching */
+        }
+        /* No artificial pause: the confirmation page is what shows the celebration. */
+        window.location.href = `/vote-confirmed?poll=${res.pollId}`;
       } catch (err) {
         submitting = false;
         setBusy(voteBtn, false);
