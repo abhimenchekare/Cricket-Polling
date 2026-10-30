@@ -9,6 +9,30 @@
   let selectedOptionId = null;
   let lastPollId = null;
   let submitting = false;
+  /* The guess the participant is currently sitting on. Kept outside the DOM so that another
+     person voting (which pushes a new state) can never bounce the slider back to its default. */
+  let bidUi = { pollId: null, index: null };
+
+  /* The same memory, but on disk — a phone that reloads (or wakes from sleep) comes back to the
+     price the participant had dialled in, not to the default. */
+  function readBidMemory(pollId) {
+    try {
+      const raw = localStorage.getItem(`cp_bid_${pollId}`);
+      const n = Number(raw);
+      return raw !== null && Number.isInteger(n) ? n : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function writeBidMemory(pollId, index) {
+    try {
+      localStorage.setItem(`cp_bid_${pollId}`, String(index));
+    } catch {
+      /* private mode — the in-memory copy is enough */
+    }
+  }
+  let structureKey = '';
 
   const els = {
     pollArea: document.getElementById('poll-area'),
@@ -20,6 +44,26 @@
     eventName: document.querySelectorAll('[data-event-name]'),
     eventTagline: document.querySelectorAll('[data-event-tagline]')
   };
+
+  /* What the card looks like, ignoring numbers that tick constantly (guess counts, timers). */
+  function pollStructureKey(p) {
+    if (!p) return 'none';
+    return [
+      p.id,
+      p.status,
+      p.playerName || '',
+      p.viewer && p.viewer.hasVoted ? 1 : 0,
+      p.viewer && p.viewer.guessLakh != null ? p.viewer.guessLakh : '',
+      p.resultsVisible ? 1 : 0,
+      p.question
+    ].join('|');
+  }
+
+  /* Cheap in-place refresh: the guess count on a live round. */
+  function updateLiveNumbers(p) {
+    const el = document.getElementById('vote-count-num');
+    if (el && p) el.textContent = String(p.totalVotes);
+  }
 
   function serverNow() {
     return Date.now() + clockOffset;
@@ -119,7 +163,16 @@
     if (spokeNew) announceShout(payload.poll.playerName);
 
     const closedNow = prev?.poll && payload.poll && prev.poll.id === payload.poll.id && prev.poll.status === 'active' && payload.poll.status === 'closed';
-    renderPoll();
+
+    /* Someone else's vote only changes a number. Rebuilding the card for that used to throw away
+       whatever price this person had dragged to — so rebuild only when the card actually changes. */
+    const nextKey = pollStructureKey(payload.poll);
+    if (nextKey !== structureKey || closedNow) {
+      structureKey = nextKey;
+      renderPoll();
+    } else {
+      updateLiveNumbers(payload.poll);
+    }
     renderStats();
     tickTimer();
     if (closedNow) {
@@ -177,8 +230,8 @@
   function renderPoll() {
     const p = state.poll;
 
-    /* No round on the block → the waiting mascot. Closed rounds use the same screen,
-       with a one-line result of the round that just finished (never a history list). */
+    /* No round on the block → the waiting mascot. Nothing about past rounds is shown:
+       no names, no sold prices, no rankings. */
     if (!p || p.status === 'closed' || p.status === 'draft') {
       document.body.classList.remove('guess-focus');
       els.pollArea.innerHTML = waitingScreen(p);
@@ -188,47 +241,62 @@
     renderBidPoll(p);
   }
 
-  /* 🦆 The waiting screen: a duck in a cap, holding a bat, tapping it on the ground
+  /* 🦆 The waiting screen: a duck in a cap bats a ball away, then gets stumped
      (and sneaking in a full swing every few seconds) until the host shouts. */
   function waitingScreen(p) {
     const finished = p && p.status === 'closed' ? p : null;
-    const result = finished ? finishedResultLine(finished) : '';
+    const result = '';
     return `
       <div class="card card-hero duck-card fade-up">
         <div class="duck-scene">
           <div class="duck-glow"></div>
-          <svg class="duck" viewBox="0 0 240 220" role="img" aria-label="A duck holding a cricket bat, waiting for the next player">
+          <svg class="duck" viewBox="0 0 240 220" role="img" aria-label="A duck in a cricket cap batting a ball, then getting stumped out while it waits">
             <!-- shadow -->
-            <ellipse class="duck-shadow" cx="120" cy="196" rx="62" ry="9" />
+            <ellipse class="duck-shadow" cx="120" cy="198" rx="66" ry="9" />
+
+            <!-- stumps on the left: the second ball takes them out -->
+            <g class="duck-stumps" transform="translate(36 150)">
+              <rect x="-16" y="0" width="6" height="44" rx="3" fill="#c9a06a" />
+              <rect x="-3" y="0" width="6" height="44" rx="3" fill="#d8b07a" />
+              <rect x="10" y="0" width="6" height="44" rx="3" fill="#c9a06a" />
+              <g class="duck-bails">
+                <rect x="-18" y="-7" width="17" height="5" rx="2.5" fill="#e7c088" />
+                <rect x="2" y="-7" width="17" height="5" rx="2.5" fill="#e7c088" />
+              </g>
+            </g>
+
+            <!-- ball two: comes in low behind the bat and takes the stumps -->
+            <circle class="duck-ball-low" cx="0" cy="0" r="7" fill="#e5484d" />
+            <circle class="duck-hit" cx="36" cy="188" r="6" fill="none" stroke="#ffd166" stroke-width="2.5" />
 
             <!-- body -->
             <g class="duck-body">
               <ellipse cx="120" cy="150" rx="58" ry="44" fill="#f6c453" />
               <ellipse cx="120" cy="158" rx="44" ry="30" fill="#ffd97a" opacity=".55" />
-              <!-- wing -->
               <path class="duck-wing" d="M96 138 q-22 6 -20 24 q16 10 34 2 q10 -14 -14 -26 z" fill="#e0a63a" />
-              <!-- tail -->
               <path class="duck-tail" d="M176 146 q22 -4 26 -16 q-16 -2 -22 6 z" fill="#e0a63a" />
             </g>
 
             <!-- head -->
             <g class="duck-head">
               <ellipse cx="108" cy="86" rx="38" ry="34" fill="#f6c453" />
-              <!-- cap -->
               <path d="M72 74 q4 -34 38 -34 q34 0 38 32 z" fill="#34d399" />
               <path d="M72 74 q40 -10 78 0 q4 6 -2 8 q-38 -8 -74 0 q-4 -3 -2 -8 z" fill="#22a06b" />
               <circle cx="110" cy="42" r="5" fill="#ffd166" />
-              <!-- eye -->
               <g class="duck-eye">
                 <circle cx="92" cy="88" r="4.6" fill="#1b2436" />
                 <circle cx="90.4" cy="86.4" r="1.5" fill="#fff" opacity=".9" />
               </g>
-              <!-- beak -->
               <path class="duck-beak" d="M66 96 q-16 2 -16 9 q0 8 16 8 l14 -2 q6 -6 0 -13 z" fill="#ff9f43" />
               <path d="M51 103 q14 3 28 1" stroke="#d97e22" stroke-width="1.6" fill="none" opacity=".7" />
             </g>
 
-            <!-- bat + feet are drawn behind/in front by the wrapping group -->
+            <g class="duck-feet">
+              <path d="M104 194 q-2 8 -12 8 q10 6 20 0 q4 -5 -8 -8 z" fill="#ff9f43" />
+              <path d="M138 194 q-2 8 -12 8 q10 6 20 0 q4 -5 -8 -8 z" fill="#ff9f43" />
+            </g>
+
+            <!-- the bat -->
             <g class="duck-bat" transform="translate(186 132) rotate(-13)">
               <rect x="-7" y="-64" width="14" height="40" rx="6" fill="#241a10" />
               <rect x="-8" y="-30" width="16" height="8" rx="3" fill="#b8794a" />
@@ -236,10 +304,21 @@
               <path d="M-11 20 L11 20 L11 26 Q11 38 0 38 Q-11 38 -11 26 Z" fill="#cfa568" />
             </g>
 
-            <g class="duck-feet">
-              <path d="M104 194 q-2 8 -12 8 q10 6 20 0 q4 -5 -8 -8 z" fill="#ff9f43" />
-              <path d="M138 194 q-2 8 -12 8 q10 6 20 0 q4 -5 -8 -8 z" fill="#ff9f43" />
+            <!-- ball one: struck off the bat -->
+            <g class="duck-ball">
+              <circle r="8" fill="#e5484d" />
+              <circle cx="-2.5" cy="-2.5" r="2.4" fill="#ff9d9d" opacity=".9" />
+              <path d="M-6 -4 Q0 0 -6 4" stroke="#fff" stroke-width="1.4" fill="none" opacity=".85" />
             </g>
+
+            <!-- contact spark -->
+            <g class="duck-spark" transform="translate(206 150)">
+              <circle r="6" fill="#ffe9a8" />
+              <g stroke="#ffd166" stroke-width="2.6" stroke-linecap="round">
+                <path d="M0 -10 V-18" /><path d="M0 10 V18" /><path d="M-10 0 H-18" /><path d="M10 0 H18" />
+              </g>
+            </g>
+
           </svg>
 
           <div class="duck-dots" aria-hidden="true"><i></i><i></i><i></i></div>
@@ -254,18 +333,6 @@
             : 'The bat is ready. Keep this page open — the next name appears here automatically.'
         }</p>
       </div>`;
-  }
-
-  /* One quiet line about the round that just ended — no lists, no charts, no archive. */
-  function finishedResultLine(p) {
-    const r = p.resultsVisible ? p.results : null;
-    if (!r || r.kind !== 'bid') return '';
-    const sold = r.actualLabel
-      ? `<strong>${escapeHtml(p.playerName || 'Player')}</strong> sold for <em>${escapeHtml(r.actualLabel)}</em>`
-      : '';
-    const rank = r.viewer && r.viewer.rank ? `you were <strong>#${r.viewer.rank}</strong> of ${r.totalGuesses}` : '';
-    const line = [sold, rank].filter(Boolean).join(' · ');
-    return line ? `<div class="duck-result">${line}</div>` : '';
   }
 
   function bidLadder() {
@@ -348,8 +415,12 @@
       return;
     }
 
-    /* Live: the drag bar */
-    const startIndex = Math.max(0, ladder.findIndex((x) => x.lakh === 1000)); // default 10 Cr
+    /* Live: the drag bar — starts 10 Cr, but keeps whatever the participant has chosen */
+    const defaultIndex = Math.max(0, ladder.findIndex((x) => x.lakh === 1000)); // default 10 Cr
+    const fromMemory = bidUi.pollId === p.id && Number.isInteger(bidUi.index) ? bidUi.index : readBidMemory(p.id);
+    const remembered =
+      Number.isInteger(fromMemory) ? Math.min(Math.max(fromMemory, 0), ladder.length - 1) : null;
+    const startIndex = remembered == null ? defaultIndex : remembered;
     els.pollArea.innerHTML = `
       <div class="card card-hero poll-card bid-card">${head}
         <div class="bid-slider-wrap">
@@ -420,8 +491,12 @@
     const voteBtn = document.getElementById('vote-btn');
     const ladder = bidLadder();
     let index = startIndex;
+    bidUi = { pollId: poll.id, index };
+    if (index !== startIndex) writeBidMemory(poll.id, index);
 
     const paint = () => {
+      bidUi.index = index;
+      writeBidMemory(poll.id, index);
       const step = ladder[index];
       const text = step ? step.label : '—';
       valueEl.textContent = text;

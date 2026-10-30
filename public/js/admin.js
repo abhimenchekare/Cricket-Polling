@@ -26,6 +26,20 @@
 
   /* ------------------------------ rendering ------------------------------ */
 
+  /* The host's dialled-in positions, kept outside the DOM: a refresh triggered by somebody
+     voting must never bounce the sold-price slider back to its default. */
+  const priceUi = { settle: { pollId: null, index: null }, live: { pollId: null, index: null } };
+
+  function rememberedIndex(slot, pollId, fallback, max) {
+    const st = priceUi[slot];
+    if (!st || st.pollId !== pollId || !Number.isInteger(st.index)) return fallback;
+    return Math.min(Math.max(st.index, 0), max);
+  }
+
+  function rememberIndex(slot, pollId, index) {
+    priceUi[slot] = { pollId, index };
+  }
+
   function render(state) {
     tickOffset = state.serverTime - Date.now();
     renderShout(state);
@@ -173,7 +187,8 @@
           <p class="mute-sm" style="margin:8px 0 0">Loading the price ladder…</p>
         </div>`;
     }
-    const startIndex = Math.max(0, ladder.findIndex((x) => x.lakh === 1000));
+    const defaultIndex = Math.max(0, ladder.findIndex((x) => x.lakh === 1000));
+    const startIndex = rememberedIndex('settle', block.pollId, defaultIndex, ladder.length - 1);
     return `
       <div id="shout-settle" style="margin-top:16px;padding-top:16px;border-top:1px solid rgba(255,255,255,.09)">
         <div class="row-between" style="flex-wrap:wrap;gap:8px">
@@ -221,6 +236,7 @@
     const paint = () => {
       const step = ladder[Number(range.value)];
       valueEl.textContent = step ? step.label : '—';
+      rememberIndex('settle', block.pollId, Number(range.value));
       wrap.querySelectorAll('.bid-chip').forEach((chip) =>
         chip.classList.toggle('active', Number(chip.dataset.index) === Number(range.value))
       );
@@ -618,9 +634,10 @@
   function bidPricePanel(poll) {
     const ladder = (metaLadder() || []).length ? metaLadder() : [];
     const hasPrice = poll.actualLakh != null;
-    const startIndex = hasPrice
+    const defaultIndex = hasPrice
       ? Math.max(0, ladder.findIndex((x) => x.lakh === poll.actualLakh))
       : Math.max(0, ladder.findIndex((x) => x.lakh === 1000));
+    const startIndex = rememberedIndex('live', poll.id, defaultIndex, Math.max(0, ladder.length - 1));
 
     return `
       <div class="bid-admin ${hasPrice ? 'is-set' : ''}" style="margin-top:16px">
@@ -703,6 +720,7 @@
     let index = Number(range.value);
 
     const paint = () => {
+      rememberIndex('live', poll.id, index);
       valueEl.textContent = ladder[index] ? ladder[index].label : '—';
       chips.querySelectorAll('.bid-chip').forEach((c) => {
         c.classList.toggle('active', Number(c.dataset.index) === index);

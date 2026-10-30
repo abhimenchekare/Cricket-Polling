@@ -193,13 +193,18 @@ const ROSTER = [
   ok('SOLD count goes up', JSON.stringify(afterSale.data.counts.sold) !== '0');
 
   await phone.waitForTimeout(1500);
+  const afterSaleText = await phone.locator('body').innerText();
+  ok('the phone never reveals the sold price', !/sold for/i.test(afterSaleText), afterSaleText.replace(/\s+/g, ' ').slice(0, 70));
+  ok('the phone never reveals a winner', !/winner/i.test(afterSaleText));
   ok(
-    'the confirmation page announces the sold round',
-    /sold|winner|locked/i.test(await phone.locator('body').innerText())
+    'the phone is either confirming the lock or back on the duck',
+    /locked/i.test(afterSaleText) || (await phone.locator('.duck').count()) === 1
   );
   await phone.goto(`${BASE}/poll`, { waitUntil: 'domcontentloaded' });
   await phone.waitForTimeout(1800);
-  ok('the poll page shows the winners', /winner|sold for/i.test(await phone.locator('body').innerText()));
+  const phoneAfter = await phone.locator('body').innerText();
+  ok('the poll page shows no names or prices after the sale', !/winner|sold for/i.test(phoneAfter), phoneAfter.replace(/\s+/g, ' ').slice(0, 70));
+  ok('the poll page is back to the duck', (await phone.locator('.duck').count()) === 1);
 
   /* ---------------- 5. SHOUT #2 ---------------- */
   console.log('\n📣 SHOUT again');

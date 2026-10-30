@@ -954,6 +954,36 @@ body.guess-focus .bid-guesscount {
   display: none;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .shout-splash-mic { animation: none; }
+}
+
+.shout-splash-label {
+  margin-top: 10px;
+  font: 800 clamp(11px, 3vw, 14px) / 1 system-ui, sans-serif;
+  letter-spacing: 0.26em;
+  color: var(--gold-300, #ffd166);
+}
+
+.shout-splash-name {
+  margin-top: 12px;
+  font: 900 clamp(30px, 9vw, 54px) / 1.08 system-ui, sans-serif;
+  color: #fff;
+  text-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+  max-width: 18ch;
+}
+
+.shout-splash-hint {
+  margin-top: 14px;
+  font: 600 clamp(13px, 3.6vw, 16px) / 1.4 system-ui, sans-serif;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Guess screen: the whole round on ONE phone screen, no scrolling.
+   While a round is live the page drops the greeting/archive and the countdown,
+   player, slider and Lock in button all fit above the fold.
+   ───────────────────────────────────────────────────────────────────────────── */
 /* ─────────────────────────────────────────────────────────────────────────────
    🦆 The waiting screen — a duck in a cricket cap, bat in hand, tapping away
    until the host shouts the next player.
@@ -1086,21 +1116,110 @@ body.guess-focus .bid-guesscount {
 /* the bat: taps the ground, then sneaks in a full practice swing */
 .duck-bat {
   transform-origin: 186px 132px;
-  animation: duckBat 6.4s cubic-bezier(0.4, 0, 0.3, 1) infinite;
+  animation: duckBat 7.2s cubic-bezier(0.36, 0, 0.24, 1) infinite;
 }
 
+/* One 7.2 s loop: gentle sway → backlift → the ball is struck → trot back →
+   a second ball sneaks past the bat and takes the stumps. */
 @keyframes duckBat {
-  0%, 6% { transform: translate(186px, 132px) rotate(-13deg); }
-  12% { transform: translate(186px, 132px) rotate(-22deg); }
-  18% { transform: translate(186px, 132px) rotate(-9deg); }
-  24% { transform: translate(186px, 132px) rotate(-22deg); }
-  30% { transform: translate(186px, 132px) rotate(-9deg); }
-  36%, 62% { transform: translate(186px, 132px) rotate(-13deg); }
-  /* big practice swing */
-  68% { transform: translate(186px, 132px) rotate(-58deg); }
-  76% { transform: translate(186px, 132px) rotate(24deg); }
-  84% { transform: translate(186px, 132px) rotate(-4deg); }
-  92%, 100% { transform: translate(186px, 132px) rotate(-13deg); }
+  0%, 8%   { transform: translate(186px, 132px) rotate(-13deg); }
+  13%      { transform: translate(186px, 132px) rotate(-20deg); }
+  18%      { transform: translate(186px, 132px) rotate(-6deg); }
+  24%, 34% { transform: translate(186px, 132px) rotate(-13deg); }
+  /* backlift */
+  40%      { transform: translate(186px, 132px) rotate(-56deg); }
+  /* strike — the bat steps out beside the body so the blade never crosses it */
+  47%      { transform: translate(208px, 126px) rotate(4deg); }
+  /* hold the pose, then follow through */
+  53%      { transform: translate(202px, 128px) rotate(-4deg); }
+  60%, 68% { transform: translate(186px, 132px) rotate(-13deg); }
+  /* the second one comes in low, under the bat */
+  74%      { transform: translate(186px, 132px) rotate(-6deg); }
+  80%, 90% { transform: translate(186px, 132px) rotate(-11deg); }
+  100%     { transform: translate(186px, 132px) rotate(-13deg); }
+}
+
+/* ball one: sits by the bat, then rockets away the instant the bat comes through */
+.duck-ball {
+  transform: translate(196px, 156px);
+  opacity: 0;
+  animation: duckBall 7.2s cubic-bezier(0.3, 0, 0.4, 1) infinite;
+}
+
+@keyframes duckBall {
+  0%, 36%   { transform: translate(196px, 156px); opacity: 0; }
+  38%       { transform: translate(198px, 152px); opacity: 1; }
+  47%       { transform: translate(210px, 150px) scale(1.15); opacity: 1; }
+  58%       { transform: translate(300px, 12px) scale(0.55); opacity: 0; }
+  100%      { transform: translate(196px, 156px); opacity: 0; }
+}
+
+/* contact spark at the instant of the strike */
+.duck-spark {
+  opacity: 0;
+  animation: duckSpark 7.2s ease-out infinite;
+}
+
+@keyframes duckSpark {
+  0%, 44%   { opacity: 0; transform: translate(206px, 150px) scale(0.4); }
+  47%       { opacity: 1; transform: translate(206px, 150px) scale(1); }
+  54%       { opacity: 0; transform: translate(206px, 150px) scale(1.65); }
+  100%      { opacity: 0; transform: translate(206px, 150px) scale(0.4); }
+}
+
+/* ball two: comes in low from the off side and hits the top of the stumps */
+.duck-ball-low {
+  opacity: 0;
+  transform: translate(180px, 158px);
+  animation: duckBallLow 7.2s cubic-bezier(0.55, 0, 0.6, 1) infinite;
+}
+
+@keyframes duckBallLow {
+  0%, 78%  { transform: translate(214px, 168px); opacity: 0; }
+  82%      { transform: translate(206px, 172px); opacity: 1; }
+  90%      { transform: translate(96px, 180px); opacity: 1; }
+  94%      { transform: translate(44px, 186px) scale(1.05); opacity: 1; }
+  100%     { transform: translate(26px, 190px) scale(0.7); opacity: 0; }
+}
+
+/* the impact ring at the foot of the stumps */
+.duck-hit {
+  opacity: 0;
+  transform-origin: 36px 188px;
+  animation: duckHit 7.2s ease-out infinite;
+}
+
+@keyframes duckHit {
+  0%, 91%  { opacity: 0; transform: scale(0.3); }
+  95%      { opacity: 1; transform: scale(1.1); }
+  100%     { opacity: 0; transform: scale(2.4); }
+}
+
+/* bails fly off when the ball hits (local coords inside the translated stump group) */
+.duck-bails {
+  transform-origin: 0px 0px;
+  animation: duckBails 7.2s cubic-bezier(0.3, 0, 0.5, 1) infinite;
+}
+
+@keyframes duckBails {
+  0%, 91% { transform: translate(0, 0) rotate(0deg); opacity: 1; }
+  95%     { transform: translate(-3px, -15px) rotate(-38deg); opacity: 1; }
+  99%     { transform: translate(-7px, -2px) rotate(-74deg); opacity: 0.9; }
+  100%    { transform: translate(0, 0) rotate(0deg); opacity: 1; }
+}
+
+/* the stumps themselves rock a little on impact */
+.duck-stumps {
+  transform-box: view-box;
+  transform-origin: 36px 194px;
+  animation: duckWicket 7.2s cubic-bezier(0.3, 0, 0.5, 1) infinite;
+}
+
+@keyframes duckWicket {
+  0%, 90%  { transform: translate(36px, 150px) rotate(0deg); }
+  94%      { transform: translate(33px, 149px) rotate(-5deg); }
+  97%      { transform: translate(38px, 151px) rotate(2.5deg); }
+  100%     { transform: translate(36px, 150px) rotate(0deg); }
 }
 
 /* the "…" bubbles */
@@ -1141,33 +1260,13 @@ body.guess-focus .bid-guesscount {
   max-width: 32ch;
 }
 
-.duck-result {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: center;
-  gap: 4px 8px;
-  margin: 4px auto 10px;
-  padding: 8px 14px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 209, 102, 0.35);
-  background: rgba(255, 209, 102, 0.1);
-  font-size: 13px;
-  color: var(--text, #fff);
-}
-
-.duck-result em {
-  font-style: normal;
-  font-weight: 800;
-  color: var(--gold-300, #ffd166);
-}
-
-.duck-result strong {
-  color: var(--text, #fff);
-}
-
 @media (prefers-reduced-motion: reduce) {
   .duck-bat,
+  .duck-ball,
+  .duck-ball-low,
+  .duck-spark,
+  .duck-bails,
+  .duck-hit,
   .duck-wing,
   .duck-feet,
   .duck-tail,

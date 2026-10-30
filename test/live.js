@@ -197,18 +197,17 @@ async function json(url, options = {}) {
     headers: authHeaders,
     body: { lakh: 150 }
   });
+  /* The phone's job at the close of a round is to clear the bid and go back to the duck —
+     names, prices and winners belong to the projector, never to the audience screen. */
   await audience
-    .waitForFunction(
-      (q) => {
-        const text = document.body.innerText;
-        return text.includes(q) && /winner|sold for/i.test(text);
-      },
-      playerName,
-      { timeout: 15000, polling: 16 }
-    )
+    .waitForFunction(() => document.querySelector('.duck') !== null, null, { timeout: 15000, polling: 16 })
     .catch(() => {});
   const closeMs = Date.now() - tClose;
-  ok(`entering the sold price reveals the winners in under ${SLOW_MS + 500} ms`, closeMs < SLOW_MS + 500, `${closeMs} ms`);
+  ok(
+    `entering the sold price clears the phone in under ${SLOW_MS + 500} ms`,
+    closeMs < SLOW_MS + 500,
+    `${closeMs} ms (no winner text shown: ${!/winner|sold for/i.test(await audience.evaluate(() => document.body.innerText))})`
+  );
 
   /* ---------------- admin dashboard still updates ---------------- */
   await adminPage.goto(`${BASE}/admin`, { waitUntil: 'domcontentloaded' });

@@ -199,11 +199,12 @@ async function cleanLeftovers() {
   ok('winners computed', Array.isArray(done.results.winners), JSON.stringify(done.results.winners).slice(0, 80));
 
   console.log('\n🏆 Participants see the result');
-  // the phone is the live bid only — a finished round collapses to one line plus the waiting duck
+  // the phone is the live bid and nothing else — a finished round is just the waiting duck
   await p.goto(`${BASE}/poll`, { waitUntil: 'networkidle' });
   await p.waitForTimeout(2500);
   const resultText = await p.locator('body').innerText();
-  ok('sold price is visible to the participant', /sold for/i.test(resultText), resultText.replace(/\s+/g, ' ').slice(0, 90));
+  ok('no player name or sold price is left on the phone', !/sold for/i.test(resultText), resultText.replace(/\s+/g, ' ').slice(0, 90));
+  ok('no rank line for this participant either', !/#\d+ of \d+/i.test(resultText));
   ok('no result list is dumped on the phone', !/Top 3 closest guesses|How the room guessed/i.test(resultText));
   ok('the phone is back to the waiting screen', (await p.locator('.duck').count()) === 1);
   await shot(p, 'b5-bid-results.png');

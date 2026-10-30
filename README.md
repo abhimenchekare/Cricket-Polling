@@ -12,7 +12,7 @@ A complete live polling website for your office cricket auction, built to run **
 
 ---
 
-## What this app does (v3.9.1 — auction list + SHOUT)
+## What this app does (v3.9.2 — auction list + SHOUT)
 
 An office-cricket-auction companion for the audience's phones.
 
@@ -295,17 +295,40 @@ The phone is a single-purpose screen: **the round that is live right now**.
 The greeting card and counter strip are **kept** (slimmed, not removed, while a round is live), so the
 phone still feels personal without turning back into a results page.
 
-When no round is live the phone shows the **waiting screen**: a duck in a cricket cap holding a bat.
-It bobs, blinks, chatters its beak, taps its feet and taps the bat on the ground — then sneaks in a
-full practice swing every six seconds — with three dots bubbling above it. When a round has just
-finished it prints **one** quiet line (`Ajit Sarpane sold for 18.0 Cr · you were #2 of 3`) and then
-goes back to waiting.
+When no round is live the phone shows the **waiting screen**: a duck in a cricket cap with a bat and
+a set of stumps. Every 7.2 seconds it plays a whole over:
+
+1. it bobs, blinks, chatters its beak, taps its feet and sways the bat;
+2. **backlift → the bat comes through and strikes the ball** — a spark flashes at contact and the
+   ball flies off to the top of the screen;
+3. it trots back to the crease, and **the second ball comes in low, beats the bat and hits the
+   stumps** — the bails fly off and the stumps rock on impact — before the set is put back up and
+   the loop starts again.
+
+Nothing about a finished round is printed on the phone any more — **no player name, no sold price,
+no rank line**. The round simply clears, the duck goes back to batting, and the winners stay on the
+projector.
 
 The duck pauses on `prefers-reduced-motion`.
 
-`npm run test:phone-fit` covers it (25 checks): the greeting card and counters are present, the duck
-exists, holds a bat, the bat is animated, no archive or results cards are in the DOM, and both the
-guess screen and the waiting screen fit one screen without scrolling.
+`npm run test:phone-fit` covers the layout (25 checks): the greeting card and counters are present,
+the duck exists, holds a bat, the bat is animated, no archive or results cards are in the DOM, and
+both the guess screen and the waiting screen fit one screen without scrolling.
+
+`npm run test:slider` covers the duck's action and the **slider memory** (22 checks) — see below.
+
+## 4b-sexies. 🎚️ Nobody else's vote may move your slider (v3.9.2)
+
+Two bugs the room found on the day, both fixed and both locked down by `npm run test:slider`:
+
+| Reported | Cause | Now |
+| --- | --- | --- |
+| "when 1 audience person submits his bid, others' bid gets reset / goes back to +10" | every push of the live state rebuilt the whole guess card, so the `<input type="range">` fell back to its default (10 Cr) | the card is rebuilt **only when the round itself changes** (new poll, status, player name, own vote, results). Another person's vote just patches the guess counter in place. On top of that the phone remembers the ladder index it was left on — in memory and in `localStorage`, so a reload or a phone waking from sleep comes back to the same price. |
+| "in admin, when the audience bid, the admin bar also gets reset" | the shout / sold-price panel repainted on every incoming vote and re-seeded the slider at 10 Cr | the host's position is remembered **per round**, in both places (the settle block in the shout panel and the live-control slider) |
+
+Proven with a **negative control**: with the fix disabled in the browser (Playwright request
+interception), the participant's slider jumps `24 → 40` and the admin's `26 → 40` the moment somebody
+else votes. With the fix, both stay put.
 
 ## 4b-quater. 📱 The guess screen is one screen — no scrolling
 
@@ -785,27 +808,29 @@ npm run test:ledger                # 70-player results: stored prices, top-3 win
 npm run test:ranking               # the scoring rule on its own (no DB needed)
 npm run test:phone-fit             # the phone guess card fits one screen, with no next-player hint
 npm run test:display               # the projector podium: 1st/2nd/3rd on the big screen
+npm run test:slider                # nobody else's vote moves your slider + the duck's batting loop
 ```
 
-**Current results (local, v3.9.1), all with zero failures:**
+**Current results (local, v3.9.2), all with zero failures — 17 suites, 507 checks:**
 
 | Suite | Checks | What it proves |
 | --- | --- | --- |
 | `e2e` | 117 | auth, poll CRUD, join, duplicate + post-deadline blocking, timers, visibility, reset, CSV |
 | `bid` | 49 | ladder steps, lakh storage, ranking, three winners |
-| **`shout`** | **34** | paste → order → SHOUT → splash on the phone → sold price → SOLD → next SHOUT, plus undo/skip/guards |
-| `ui` | 32 | join, dashboard, projector, mobile layouts, auto-return from the confirmation |
-| `ui-bid` | 29 | the full slider round on an iPhone 13, incl. the bounce back to the poll |
+| **`shout`** | **37** | paste → order → SHOUT → splash on the phone → sold price → SOLD → next SHOUT, plus undo/skip/guards |
+| `ui` | 33 | join, dashboard, projector, mobile layouts, auto-return from the confirmation |
+| `ui-bid` | 30 | the full slider round on an iPhone 13, incl. the bounce back to the poll |
 | **`vote-speed`** | **7** | Lock-in latency, measured warm **and** with every API call delayed 800 ms |
 | **`ledger`** | **32** | 3 rounds end to end: prices stored, 1st/2nd/3rd correct, late settlement, leaderboard, CSV |
 | **`ranking`** | **16** | the scoring rule itself, incl. 65-vs-60 accurate guesses over 70 players (no DB, no browser) |
 | **`phone-fit`** | **25** | one-screen guess card, greeting + counters kept, no next-player hint, duck waiting screen |
+| **`slider`** | **22** | another person's vote never moves your slider (phone **and** admin), no name/price/rank after a round, the duck bats then gets bowled |
 | **`display`** | **20** | big screen: bat-and-ball reveal, then 1st/2nd/3rd place, no player name, fits 1920×1080 |
 | `ui-rapid` | 18 | 10s…2 min presets, remembered across reloads, used by the next SHOUT |
 | `ui-session` | 30 | admin sign-in/session/logout |
-| `live` | 10 | start→phone 241 ms, vote→second phone 679 ms, price→winners 1343 ms, fallback polling |
+| `live` | 10 | start→phone 241 ms, vote→second phone 679 ms, price→phone cleared 1346 ms, fallback polling |
 | `routes` | 21 | `/admin/players` and every other route on a real deployment |
-| `config` | 36 | Vercel rewrites, serverless layout, no Socket.IO / QR / local-file DB |
+| `config` | 37 | Vercel rewrites, serverless layout, no Socket.IO / QR / local-file DB |
 | `perf` | 3 | `/api/state` p95 32 ms, poll screen usable in 78 ms |
 
 Screenshots of the browser runs land in `test/screenshots/` (`sh1-auction-list.png`,
@@ -885,4 +910,4 @@ role and base price, and the price you type when the hammer falls. That is all i
 
 ---
 
-*Cricket Auction Live Polling — v3.9.1 · Express + Postgres on Vercel · separate from the auction website.*
+*Cricket Auction Live Polling — v3.9.2 · Express + Postgres on Vercel · separate from the auction website.*

@@ -180,7 +180,9 @@ const PLAYER = `UI Player ${Date.now() % 100000}`;
 
   await p1.goto(`${BASE}/poll`, { waitUntil: 'networkidle' });
   await p1.waitForTimeout(2500);
-  ok('phone shows the winners', /winner|🥇|2\.00 Cr/i.test(await p1.locator('#poll-area').innerText()));
+  const phoneArea = await p1.locator('#poll-area').innerText();
+  ok('the phone shows the waiting duck instead of the winners', (await p1.locator('.duck').count()) === 1, phoneArea.slice(0, 60));
+  ok('the phone shows no name, price or rank', !/winner|🥇|2\.00 Cr|sold for/i.test(phoneArea));
   await shot(p1, '10-poll-winners-mobile.png');
 
   /* --------------------------- the guess sheet --------------------------- */
