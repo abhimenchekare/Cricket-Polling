@@ -299,24 +299,24 @@ async function main() {
   const lateGuess = await bob.post('/api/vote', { pollId, guessLakh: 300 });
   ok('guess after the deadline rejected', lateGuess.status === 409);
 
-  /* 9. Sold price → 3 winners */
-  section('Sold price → three winners');
+  /* 9. Sold price → exact bids win (v4.0.0) */
+  section('Sold price → only exact bids win');
   const sold = await admin.post(`/api/admin/polls/${pollId}/actual`, { lakh: 185 });
   ok('sold price accepted', sold.status === 200 && sold.data.actualLakh === 185, JSON.stringify(sold.data));
-  ok('three winners declared', Array.isArray(sold.data.winners) && sold.data.winners.length === 3);
+  ok('no exact bid → no winners', Array.isArray(sold.data.winners) && sold.data.winners.length === 0, `${sold.data.winners && sold.data.winners.length}`);
+  ok('the closest guess is reported instead', sold.data.closest && sold.data.closest.guessLakh === 175, JSON.stringify(sold.data.closest));
 
   const readable = await alice.get('/api/state');
   const seen = readable.data.poll?.id === pollId ? readable.data.poll : readable.data.history.find((h) => h.id === pollId);
   ok('winners visible to participants', !!seen && seen.resultsVisible === true);
   ok('all three guesses counted', seen?.results?.totalGuesses === 3, String(seen?.results?.totalGuesses));
+  ok('nobody nailed 1.85 Cr, so no winners exist', seen?.results?.winners?.length === 0, String(seen?.results?.winners?.length));
   ok(
-    'winner 1 is the closest guess (1.75 Cr, 10 L under)',
-    seen?.results?.winners?.[0]?.guessLakh === 175 && seen.results.winners[0].diffLakh === 10,
-    JSON.stringify(seen?.results?.winners?.[0])
+    'the closest guess (1.75 Cr, 10 L under) is shown as information',
+    seen?.results?.closest?.guessLakh === 175 && seen.results.closest.diffLakh === 10,
+    JSON.stringify(seen?.results?.closest)
   );
-  ok('winner 2 is 2.00 Cr (15 L over)', seen?.results?.winners?.[1]?.guessLakh === 200 && seen.results.winners[1].direction === 'over');
-  ok('winner 3 is 1.50 Cr (35 L under)', seen?.results?.winners?.[2]?.guessLakh === 150 && seen.results.winners[2].diffLakh === 35);
-  ok('nobody is ranked lower than 3rd as a winner', seen.results.winners.every((w) => w.rank <= 3));
+  ok('a near miss is not called a winner', seen?.results?.closest?.rank === undefined);
 
   /* 10. THE admin answer sheet */
   section('Admin guess sheet (who guessed, who did not, winners)');
@@ -495,7 +495,18 @@ async function main() {
   const rrClosed = rrAfter.history.find((h) => h.id === rrId) || (rrAfter.poll && rrAfter.poll.id === rrId ? rrAfter.poll : null);
   ok('entering the sold price closes and reveals the round', !!rrClosed && rrClosed.resultsVisible === true);
   ok('round keeps both guesses', !!rrClosed && rrClosed.totalVotes === 2, String(rrClosed && rrClosed.totalVotes));
-  ok('winners are ranked', !!rrClosed && rrClosed.results.winners.length === 2);
+  /* 5.00 Cr and 5.50 Cr were guessed, the player sold for 5.25 Cr → nobody exact, no winner */
+  ok('nobody exact → no winners', !!rrClosed && rrClosed.results.winners.length === 0, String(rrClosed && rrClosed.results.winners.length));
+  ok('the closest guess is named', rrClosed.results.closest && rrClosed.results.closest.guessLakh === 500, JSON.stringify(rrClosed.results.closest));
+
+  /* correct the price to the guess that was actually right → that person wins the player */
+  await admin.post(`/api/admin/polls/${rrId}/actual`, { lakh: 500 });
+  const rrFixed = (await rrA.get('/api/state')).data.history.find((h) => h.id === rrId);
+  ok(
+    'the exact bid wins once the price matches it',
+    rrFixed.results.winners.length === 1 && rrFixed.results.winners[0].guessLakh === 500 && rrFixed.results.winners[0].rank === 1,
+    JSON.stringify(rrFixed.results.winners.map((w) => [w.name, w.guessLakh, w.rank]))
+  );
   await admin.del(`/api/admin/polls/${rrId}`);
 
   /* 19. Persistence */

@@ -123,7 +123,13 @@
       )} — enter the sold price to rank them</div>`;
     }
     if (!results.winners || !results.winners.length) {
-      return '<div class="empty">Sold price entered, but nobody guessed</div>';
+      // Exact bids only: this player may simply have had nobody on the number.
+      const c = results.closest;
+      return c
+        ? `<div class="empty">No right bid on this one · closest was <strong>${escapeHtml(
+            c.name
+          )}</strong> ${escapeHtml(c.guessLabel)} (${escapeHtml(c.diffLabel)} off)</div>`
+        : '<div class="empty">Sold price entered, but nobody guessed</div>';
     }
     const medal = ['🥇', '🥈', '🥉'];
     return results.winners

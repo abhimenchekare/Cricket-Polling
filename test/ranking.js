@@ -5,8 +5,11 @@
  *
  *   node test/ranking.js
  *
- * This is the file that decides who wins the auction, so it is tested on its own, with the exact
- * scenario the host described: 70 players, one participant nearest on 65 of them, another on 60.
+ * v4.0.0 rule, chosen by the host:
+ *   - a player is won ONLY by an exact bid (right on the price). Nobody exact → no winner.
+ *   - overall 1st/2nd/3rd go to the most right bids; closest calls only break the tie.
+ *
+ * This file is the referee for the whole auction, so every branch is pinned here.
  */
 
 const ranking = require('../server/ranking');
@@ -23,12 +26,13 @@ const ok = (name, cond, extra = '') => {
   }
 };
 
-console.log('\n🧮 Scoring rules\n' + '='.repeat(58));
+console.log('\n🧮 Scoring rules (v4.0.0 — exact bids win)\n' + '='.repeat(58));
 
-/* ---------------------------------------------------------------- */
-/* 1. Per player: is "closest to the sold price" ranked correctly?  */
-/* ---------------------------------------------------------------- */
-console.log('\n1️⃣  One player sells — who is 1st, 2nd, 3rd');
+/* ------------------------------------------------------------------ */
+/* 1. One player: everyone is ranked, but only the exact bid wins      */
+/* ------------------------------------------------------------------ */
+console.log('\n1️⃣  One player sells at 3.00 Cr');
+
 const guesses = [
   { participant_id: 1, name: 'Priya', employee_id: 'E1', guess_lakh: 300, created_at: 5 }, // exact
   { participant_id: 2, name: 'Rahul', employee_id: 'E2', guess_lakh: 325, created_at: 3 }, // 25 off
@@ -37,131 +41,193 @@ const guesses = [
   { participant_id: 5, name: 'Vik', employee_id: 'E5', guess_lakh: 500, created_at: 1 } // 200 off
 ];
 const ranked = ranking.rankGuesses(guesses, 300);
-ok('1st is the exact guess', ranked[0].name === 'Priya' && ranked[0].diffLakh === 0);
-ok('2nd is 25 L away', ranked[1].name === 'Rahul' && ranked[1].diffLakh === 25);
-ok('equal distance goes to whoever locked in first', ranked[2].name === 'Amit' && ranked[2].diffLakh === 25);
-ok('4th and 5th follow distance', ranked[3].name === 'Neha' && ranked[4].name === 'Vik');
-ok('everyone gets a rank, not just the winners', ranked.length === 5 && ranked[4].rank === 5);
 
-/* ---------------------------------------------------------------- */
-/* 2. THE QUESTION: 65 nearest vs 60 nearest over 70 players        */
-/* ---------------------------------------------------------------- */
-console.log('\n2️⃣  70 players — 65 nearest vs 60 nearest');
+ok('the list is still ordered nearest-first', ranked[0].name === 'Priya' && ranked[1].diffLakh === 25);
+ok('everyone still gets a rank', ranked.length === 5 && ranked[4].rank === 5);
+ok('equal distance goes to whoever locked in first', ranked[1].name === 'Rahul' && ranked[2].name === 'Amit');
 
-/** Build 70 fake rounds where the winner list is chosen by name. */
-function buildRounds(winnersByRound) {
-  return winnersByRound.map((names, i) => ({
-    settled: true,
-    name: `Player ${i + 1}`,
-    ranked: names.map((n, idx) => ({
-      participantId: n.id,
-      name: n.name,
-      employeeId: n.eid,
-      guessLakh: 1000,
-      guessLabel: '10.0 Cr',
-      diffLakh: idx === 0 ? 10 : idx === 1 ? 25 : 40,
-      diffLabel: idx === 0 ? '10 L' : idx === 1 ? '25 L' : '40 L',
-      direction: 'over',
-      rank: idx + 1
-    }))
-  }));
-}
+const exact = ranking.exactWinners(ranked);
+ok('only the exact bid wins this player', exact.length === 1 && exact[0].name === 'Priya', `${exact.length} winner(s)`);
+ok('the winner is flagged rank 1 and spot on', exact[0].rank === 1 && exact[0].diffLakh === 0);
+ok('the 25 L miss is not a "win"', !exact.some((w) => w.name === 'Rahul'));
 
-const A = { id: 1, name: 'Audience 1', eid: 'A1' };
-const B = { id: 2, name: 'Audience 2', eid: 'A2' };
-const C = { id: 3, name: 'Audience 3', eid: 'A3' };
+/* ------------------------------------------------------------------ */
+/* 2. Nobody exact → the player has no winners at all                  */
+/* ------------------------------------------------------------------ */
+console.log('\n2️⃣  Nobody nails the price');
+const offByALittle = ranking.rankGuesses(
+  [
+    { participant_id: 7, name: 'Close', employee_id: 'C', guess_lakh: 325, created_at: 1 },
+    { participant_id: 8, name: 'Closer', employee_id: 'D', guess_lakh: 300 + 25, created_at: 2 },
+    { participant_id: 9, name: 'Far', employee_id: 'F', guess_lakh: 500, created_at: 3 }
+  ],
+  300
+);
+ok('no exact bid → no winners', ranking.exactWinners(offByALittle).length === 0);
+const consolation = ranking.closestGuess(offByALittle);
+ok('the nearest guess is still reported as information', consolation && consolation.name === 'Close' && consolation.diffLakh === 25, JSON.stringify(consolation && consolation.name));
+ok('and it is not dressed up as a win', !consolation.rank);
 
-const rounds = [];
-for (let i = 0; i < 70; i++) {
-  if (i < 65) rounds.push([A, B, C]); // A is nearest on the first 65
-  else if (i < 70) rounds.push([B, A, C]); // B is nearest on the last 5
-  else rounds.push([C, B, A]);
-}
+/* ------------------------------------------------------------------ */
+/* 3. More than three exact bids → earliest three, ranks 1/2/3         */
+/* ------------------------------------------------------------------ */
+console.log('\n3️⃣  Five people are all spot on');
+const fiveExact = ranking.rankGuesses(
+  [9, 4, 6, 1, 2].map((at, i) => ({
+    participant_id: i + 1,
+    name: `P${i + 1}`,
+    employee_id: `E${i + 1}`,
+    guess_lakh: 250,
+    created_at: at
+  })),
+  250
+);
+const fiveWinners = ranking.exactWinners(fiveExact);
+ok('at most three winners are declared', fiveWinners.length === 3, `${fiveWinners.length}`);
+ok('ranks are 1,2,3', fiveWinners.map((w) => w.rank).join(',') === '1,2,3');
+ok('the earliest lock-ins take the podium', fiveWinners.map((w) => w.at).join(',') === '1,2,4', fiveWinners.map((w) => w.at).join(','));
 
-const table = ranking.buildStandings(buildRounds(rounds));
-const a = table.find((t) => t.name === 'Audience 1');
-const b = table.find((t) => t.name === 'Audience 2');
+/* ------------------------------------------------------------------ */
+/* 4. THE HOST'S CASE: 1 right bid but closest in 4 rounds             */
+/* ------------------------------------------------------------------ */
+console.log('\n4️⃣  Four phones: 1 right bid, closest in every round');
 
-console.log(`     Audience 1: nearest ${a.nearest} of 70 · top-3 ${a.top3} · ${a.points} pts`);
-console.log(`     Audience 2: nearest ${b.nearest} of 70 · top-3 ${b.top3} · ${b.points} pts`);
+const A = { id: 1, name: 'Asha', eid: 'A1' };
+const B = { id: 2, name: 'Bilal', eid: 'B2' };
+const C = { id: 3, name: 'Chetan', eid: 'C3' };
+const D = { id: 4, name: 'Divya', eid: 'D4' };
 
-ok('nearest counts are right', a.nearest === 65 && b.nearest === 5, `${a.nearest} vs ${b.nearest}`);
-ok('Audience 1 wins on nearest bids', table[0].name === 'Audience 1', table[0].name);
-ok('Audience 1 is ranked #1', a.rank === 1 && b.rank === 2);
+/** one round: [participant, distance from the sold price] in guess order */
+const round = (pairs) => ({
+  settled: true,
+  name: 'player',
+  ranked: pairs.map(([who, diff], i) => ({
+    participantId: who.id,
+    name: who.name,
+    employeeId: who.eid,
+    guessLakh: 1000,
+    guessLabel: '10.0 Cr',
+    diffLakh: diff,
+    diffLabel: diff === 0 ? '0' : `${diff} L`,
+    direction: diff === 0 ? 'exact' : 'over',
+    rank: i + 1
+  }))
+});
 
-/* the old points rule would also have picked A here — so test a case where they disagree */
-console.log('\n3️⃣  Where the two rules disagree');
-const mixed = [];
-for (let i = 0; i < 60; i++) mixed.push([A, B, C]); // A nearest 60 times
-for (let i = 0; i < 10; i++) mixed.push([B, C, A]); // B nearest 10 times
-const t2 = ranking.buildStandings(buildRounds(mixed));
-const a2 = t2.find((t) => t.name === 'Audience 1');
-const b2 = t2.find((t) => t.name === 'Audience 2');
-console.log(`     Audience 1: nearest ${a2.nearest} · top-3 ${a2.top3} · ${a2.points} pts`);
-console.log(`     Audience 2: nearest ${b2.nearest} · top-3 ${b2.top3} · ${b2.points} pts`);
-ok('most nearest bids decides', t2[0].name === 'Audience 1');
-ok('count, not points, is the deciding number', a2.nearest > b2.nearest);
+const hostCase = [
+  round([
+    [A, 0],
+    [B, 25],
+    [C, 50],
+    [D, 100]
+  ]), // Asha exact
+  round([
+    [A, 40],
+    [B, 140],
+    [C, 190]
+  ]),
+  round([
+    [A, 60],
+    [B, 160]
+  ]),
+  round([
+    [A, 100],
+    [B, 200]
+  ])
+];
+const hostTable = ranking.buildStandings(hostCase);
+const asha = hostTable.find((x) => x.name === 'Asha');
+const bilal = hostTable.find((x) => x.name === 'Bilal');
 
-/* ties: same nearest count -> fewest total distance */
-console.log('\n4️⃣  Ties');
-const tie = ranking.buildStandings([
-  {
-    settled: true,
-    name: 'P1',
-    ranked: [
-      { participantId: 1, name: 'Close', employeeId: 'x', diffLakh: 10, rank: 1, direction: 'over' },
-      { participantId: 2, name: 'Far', employeeId: 'y', diffLakh: 60, rank: 2, direction: 'over' }
-    ]
-  },
-  {
-    settled: true,
-    name: 'P2',
-    ranked: [
-      { participantId: 1, name: 'Close', employeeId: 'x', diffLakh: 200, rank: 2, direction: 'over' },
-      { participantId: 2, name: 'Far', employeeId: 'y', diffLakh: 5, rank: 1, direction: 'over' }
-    ]
-  }
+console.log(`     Asha : right bids ${asha.exact} · closest ${asha.closest} · top-3 ${asha.top3}`);
+console.log(`     Bilal: right bids ${bilal.exact} · closest ${bilal.closest} · top-3 ${bilal.top3}`);
+ok('Asha really has 1 right bid', asha.exact === 1);
+ok('but 4 closest calls', asha.closest === 4);
+ok('the two numbers are separate fields', asha.exact !== asha.closest);
+ok('Asha leads the board', hostTable[0].name === 'Asha');
+ok('Bilal has 0 right bids even though he was top-3 four times', bilal.exact === 0 && bilal.top3 === 4);
+
+/* ------------------------------------------------------------------ */
+/* 5. Right bids beat closest calls                                    */
+/* ------------------------------------------------------------------ */
+console.log('\n5️⃣  One right bid beats five near misses');
+const rightBeatsClose = ranking.buildStandings([
+  round([
+    [A, 5],
+    [B, 25]
+  ]),
+  round([
+    [A, 10],
+    [B, 25]
+  ]),
+  round([
+    [A, 15],
+    [B, 25]
+  ]),
+  round([
+    [B, 0],
+    [A, 25]
+  ])
 ]);
-ok('same number of nearest bids → smaller total miss wins', tie[0].name === 'Far', tie[0].name);
-ok('tie-break detail is exposed', tie[0].totalDiffLakh === 65 && tie[1].totalDiffLakh === 210);
+const tableA = rightBeatsClose.find((x) => x.name === 'Asha');
+const tableB = rightBeatsClose.find((x) => x.name === 'Bilal');
+ok('the single exact bid ranks above three closest calls', rightBeatsClose[0].name === 'Bilal', `${rightBeatsClose[0].name} first`);
+ok('closest calls are still counted for the tie-break', tableA.closest === 3 && tableB.closest === 1);
+ok('the ranking is exact desc, then closest desc', rightBeatsClose[0].exact === 1 && tableA.exact === 0);
 
-/* exact hits: the host's "guess 2 Cr on a 2 Cr player" case */
-console.log('\n4b️⃣  Exact hits break a tie on accurate guesses');
-const exactTie = ranking.buildStandings([
-  {
-    settled: true,
-    name: 'P1',
-    ranked: [
-      { participantId: 1, name: 'SpotOn', employeeId: 'e', guessLakh: 200, diffLakh: 0, rank: 1, direction: 'exact' },
-      { participantId: 2, name: 'NearMiss', employeeId: 'f', guessLakh: 225, diffLakh: 25, rank: 2, direction: 'over' }
-    ]
-  },
-  {
-    settled: true,
-    name: 'P2',
-    ranked: [
-      { participantId: 1, name: 'SpotOn', employeeId: 'e', guessLakh: 210, diffLakh: 10, rank: 2, direction: 'over' },
-      { participantId: 2, name: 'NearMiss', employeeId: 'f', guessLakh: 205, diffLakh: 5, rank: 1, direction: 'over' }
-    ]
-  }
+/* ------------------------------------------------------------------ */
+/* 6. Ties: equal right bids → closest calls, then total distance      */
+/* ------------------------------------------------------------------ */
+console.log('\n6️⃣  Same number of right bids');
+const sameExact = ranking.buildStandings([
+  round([
+    [A, 0],
+    [B, 0]
+  ]), // both spot on: one right bid each
+  round([
+    [B, 10],
+    [A, 20]
+  ]),
+  round([
+    [B, 10],
+    [A, 20]
+  ])
 ]);
-const spot = exactTie.find((x) => x.name === 'SpotOn');
-const near = exactTie.find((x) => x.name === 'NearMiss');
-ok('both have one accurate guess', spot.nearest === 1 && near.nearest === 1);
-ok('the exact hit wins the tie', exactTie[0].name === 'SpotOn', exactTie[0].name);
-ok('exact hits are counted', spot.exact === 1 && near.exact === 0);
+const sameA = sameExact.find((x) => x.name === 'Asha');
+const sameB = sameExact.find((x) => x.name === 'Bilal');
+ok('both have one right bid', sameA.exact === 1 && sameB.exact === 1);
+ok('more closest calls breaks the tie', sameExact[0].name === 'Bilal' && sameB.closest > sameA.closest, `${sameB.closest} vs ${sameA.closest}`);
+ok('total distance is the next tie-break and is exposed', typeof sameExact[0].totalDiffLakh === 'number');
 
-/* unsold players must never count */
-console.log('\n5️⃣  Only sold players count');
+const deadTie = ranking.buildStandings([
+  round([
+    [A, 10],
+    [B, 10]
+  ])
+]);
+ok('a perfect dead heat falls back to alphabetical', deadTie[0].name === 'Asha', deadTie.map((x) => x.name).join(' / '));
+
+/* ------------------------------------------------------------------ */
+/* 7. Only sold players count                                          */
+/* ------------------------------------------------------------------ */
+console.log('\n7️⃣  Unsold players never count');
 const withUnsold = ranking.buildStandings([
-  {
-    settled: true,
-    name: 'Sold',
-    ranked: [{ participantId: 9, name: 'Someone', employeeId: 'z', diffLakh: 5, rank: 1, direction: 'over' }]
-  },
+  round([[A, 0]]),
   { settled: false, name: 'No price yet', ranked: [] }
 ]);
-ok('an unpriced player adds nothing', withUnsold.length === 1 && withUnsold[0].nearest === 1);
+ok('an unpriced player adds nothing', withUnsold.length === 1 && withUnsold[0].exact === 1);
+
+/* ------------------------------------------------------------------ */
+/* 8. Fields the screens rely on                                       */
+/* ------------------------------------------------------------------ */
+console.log('\n8️⃣  What the big screen reads');
+const shape = hostTable[0];
+ok('rank', shape.rank === 1);
+ok('right bids (the big number)', shape.exact === 1);
+ok('closest calls (the small line)', shape.closest === 4);
+ok('legacy "nearest" still equals closest calls', shape.nearest === shape.closest);
+ok('rounds played', shape.rounds === 4);
+ok('average miss is a ladder label', typeof shape.avgDiffLabel === 'string', String(shape.avgDiffLabel));
 
 console.log('\n' + '='.repeat(58));
 console.log(`  Scoring rules: ${pass} passed, ${fail} failed`);

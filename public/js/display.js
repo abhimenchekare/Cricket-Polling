@@ -1,7 +1,7 @@
 /* Full-screen presentation mode — the winners board.
  *
- * The big screen answers one question only: who has guessed the most players accurately?
- * 1st, 2nd and 3rd, with how many accurate guesses each of them has.
+ * The big screen answers one question only: who has nailed the most sold prices exactly?
+ * 1st, 2nd and 3rd, with how many right bids each of them has (closest calls break the tie).
  *
  * Every time a sold price lands, a bat-and-ball reveal plays before the winners reappear.
  */
@@ -137,14 +137,14 @@
     mainEl.innerHTML = `
       <div class="dp-board fade-up">
         <div class="dp-board-head">
-          <div class="dp-board-title">Most accurate guesses</div>
-          <div class="dp-board-sub">${board.rounds} of ${board.players} players sold</div>
+          <div class="dp-board-title">Right on the price</div>
+          <div class="dp-board-sub">${board.rounds} of ${board.players} players sold · most right bids wins</div>
         </div>
 
         ${
           top.length
             ? ''
-            : `<div class="dp-board-empty">Sold prices are in, but nobody guessed yet — the board fills the moment the first accurate guess lands.</div>`
+            : `<div class="dp-board-empty">Sold prices are in, but nobody guessed yet — the board fills the moment the first guess lands.</div>`
         }
         <div class="dp-podium">
           ${top
@@ -154,10 +154,12 @@
               <div class="dp-winner-badge">${medalLabel(s.rank)}</div>
               <div class="dp-winner-name">${escapeHtml(s.name)}</div>
               <div class="dp-winner-score">
-                <strong>${s.nearest}</strong>
-                <span>accurate ${s.nearest === 1 ? 'guess' : 'guesses'}</span>
+                <strong>${s.exact}</strong>
+                <span>${s.exact === 1 ? 'right bid' : 'right bids'}</span>
               </div>
-              ${s.exact ? `<div class="dp-winner-exact">${s.exact} spot on</div>` : '<div class="dp-winner-exact is-empty">&nbsp;</div>'}
+              <div class="dp-winner-exact${s.closest ? '' : ' is-empty'}">${
+                s.closest ? `${s.closest} closest ${s.closest === 1 ? 'call' : 'calls'}` : '&nbsp;'
+              }</div>
             </div>`
             )
             .join('')}

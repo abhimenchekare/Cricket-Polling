@@ -5,7 +5,7 @@
  *
  * With 70 players going under the hammer one by one, the host needs one place that answers:
  *
- *   - what each player actually sold for, and who called it (1st / 2nd / 3rd closest)
+ *   - what each player actually sold for, and who called it exactly (no exact bid = no winner)
  *   - which players are still waiting for a price
  *   - who is leading the room overall after N players
  *
@@ -15,10 +15,10 @@
 
 const { q } = require('./db');
 const ladder = require('./bidladder');
-const { rankGuesses, buildStandings } = require('./ranking');
+const { rankGuesses, buildStandings, exactWinners, closestGuess } = require('./ranking');
 
-/** Rank guesses for one round: closest = 1st, then 2nd, 3rd. Ties go to whoever locked first. */
-/** Every player on the auction list, with their stored result and their three winners. */
+/** Rank guesses for one round: nearest first. Only an exact bid wins (see exactWinners). */
+/** Every player on the auction list, with their stored result and their exact-bid winners. */
 async function buildLedger() {
   const players = await q(
     `SELECT ap.id, ap.name, ap.role, ap.base_lakh, ap.position, ap.status, ap.poll_id,
@@ -68,7 +68,7 @@ async function buildLedger() {
       soldLakh: sold,
       soldLabel: sold == null ? null : ladder.label(sold),
       settled: sold != null,
-      winners: ranked.slice(0, 3).map((w) => ({
+      winners: exactWinners(ranked).map((w) => ({
         rank: w.rank,
         name: w.name,
         guessLakh: w.guessLakh,
@@ -77,6 +77,9 @@ async function buildLedger() {
         diffLabel: w.diffLabel,
         direction: w.direction
       })),
+      /* When nobody nailed the price there is no winner for this player — the nearest guess is
+         kept so the ledger can still say who came closest. */
+      closest: exactWinners(ranked).length ? null : closestGuess(ranked),
       ranked
     };
   });
@@ -100,7 +103,7 @@ async function buildLedger() {
 }
 
 /**
- * Overall standings: a 1st place is worth 3 points, 2nd 2, 3rd 1 — the "closest to the bid" rule
- * applied across every player sold so far. Ties break on 1st places, then on total distance.
+ * Overall standings: most exact bids ("right on the price") wins; closest calls break the tie,
+ * then top-3 finishes, then total distance. See server/ranking.js for the full rule.
  */
 module.exports = { buildLedger, buildStandings, rankGuesses };

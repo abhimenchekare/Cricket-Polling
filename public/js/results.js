@@ -119,13 +119,13 @@
         <div class="card-head">
           <div>
             <div class="eyebrow">🏆 Leaderboard</div>
-            <div class="card-title" style="margin-top:4px">Most accurate guesses wins</div>
+            <div class="card-title" style="margin-top:4px">Most right bids wins</div>
           </div>
           <span class="pill pill-gold">${data.rounds} ${data.rounds === 1 ? 'player' : 'players'} sold</span>
         </div>
         <div class="table-wrap">
           <table class="table">
-            <thead><tr><th>#</th><th>Who</th><th>Accurate</th><th>Top-3</th><th>Exact</th></tr></thead>
+            <thead><tr><th>#</th><th>Who</th><th>Right bids</th><th>Closest</th><th>Top-3</th></tr></thead>
             <tbody>
               ${data.standings
                 .slice(0, 10)
@@ -133,9 +133,9 @@
                   (s) => `<tr>
                     <td><strong style="color:${medal[s.rank - 1] || 'inherit'}">${s.rank}</strong></td>
                     <td><strong>${escapeHtml(s.name)}</strong></td>
-                    <td><strong style="color:var(--gold-300,#ffd166)">${s.nearest}</strong></td>
+                    <td><strong style="color:var(--gold-300,#ffd166)">${s.exact}</strong></td>
+                    <td>${s.closest || '·'}</td>
                     <td>${s.top3 || '·'}</td>
-                    <td>${s.exact || '·'}</td>
                   </tr>`
                 )
                 .join('')}

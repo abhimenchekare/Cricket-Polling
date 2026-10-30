@@ -441,12 +441,14 @@ router.get('/standings', async (req, res, next) => {
         name: s.name,
         firsts: s.firsts,
         nearest: s.nearest,
+        closest: s.closest,
         top3: s.top3,
         rounds: s.rounds,
         seconds: s.seconds,
         thirds: s.thirds,
         points: s.points,
-        exact: s.exact
+        exact: s.exact,
+        rightBids: s.exact
       })),
       latest: rows
         .filter((r) => r.settled)

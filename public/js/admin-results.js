@@ -70,8 +70,8 @@
         <table class="table">
           <thead>
             <tr>
-              <th>#</th><th>Participant</th><th>Accurate guesses</th><th>of rounds</th>
-              <th>Top-3</th><th>2nd</th><th>3rd</th><th>Exact</th><th>Avg miss</th>
+              <th>#</th><th>Participant</th><th>Right bids</th><th>Closest calls</th>
+              <th>of rounds</th><th>Top-3</th><th>Avg miss</th>
             </tr>
           </thead>
           <tbody>
@@ -82,12 +82,10 @@
               <tr>
                 <td>${s.rank <= 3 ? `<strong style="color:var(--gold-300,#ffd166)">#${s.rank}</strong>` : s.rank}</td>
                 <td><strong>${escapeHtml(s.name)}</strong></td>
-                <td><strong style="color:var(--gold-300,#ffd166);font-size:15px">${s.nearest}</strong></td>
+                <td><strong style="color:var(--gold-300,#ffd166);font-size:15px">${s.exact}</strong></td>
+                <td>${s.closest || '·'}</td>
                 <td class="mute-sm">${s.rounds}</td>
                 <td>${s.top3 || '·'}</td>
-                <td>${s.seconds || '·'}</td>
-                <td>${s.thirds || '·'}</td>
-                <td>${s.exact || '·'}</td>
                 <td class="mute-sm">${escapeHtml(s.avgDiffLabel || '—')}</td>
               </tr>`
               )
@@ -100,6 +98,15 @@
   function winnersCell(row) {
     if (!row.settled) return '<span class="mute-sm">winners appear once the price is in</span>';
     if (!row.guessCount) return '<span class="mute-sm">nobody guessed this player</span>';
+    if (!row.winners.length) {
+      // only an exact bid wins — say who came closest, but do not dress it up as a prize
+      const c = row.closest;
+      return c
+        ? `<span class="mute-sm">no right bid · closest <strong>${escapeHtml(c.name)}</strong> ${escapeHtml(
+            c.guessLabel
+          )} (${escapeHtml(c.diffLabel)} off)</span>`
+        : '<span class="mute-sm">no right bid</span>';
+    }
     return row.winners
       .map(
         (w) => `

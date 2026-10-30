@@ -4,7 +4,7 @@
  * 🖥  Big screen — the winners podium.
  *
  * The projector has to answer the only question the room is asking:
- * "who has guessed the most players accurately?" — 1st, 2nd and 3rd.
+ * "who has the most right-on-the-price bids?" — 1st, 2nd and 3rd (v4.0.0 rule).
  *
  *   npm run dev
  *   node test/display.js
@@ -92,12 +92,12 @@ const STAMP = Date.now().toString().slice(-5);
     await page.close();
   }
 
-  /* Play the rounds: each player sells for 2.00 / 2.20 / 2.40 Cr.
-     Alpha is always the closest (25 L, then 5 L, then 15 L)
-     Bravo is second twice, Charlie second once. */
+  /* Play the rounds: each player sells for 2.00 / 2.25 / 2.40 Cr.
+     Alpha guesses 2.25 Cr every time, so Alpha is EXACT on the middle player and closest on
+     all three. Bravo (2.50) is closest once, Charlie (3.00) never. */
   const rounds = [
     { player: players[0], sold: 200 },
-    { player: players[1], sold: 220 },
+    { player: players[1], sold: 225 },
     { player: players[2], sold: 240 }
   ];
 
@@ -136,6 +136,11 @@ const STAMP = Date.now().toString().slice(-5);
   const rCharlie = rankOf(`Charlie ${STAMP}`);
   console.log(`     Alpha #${rAlpha} · Bravo #${rBravo} · Charlie #${rCharlie} (of ${standings.length})`);
   ok('Alpha outranks Bravo', rAlpha < rBravo, `#${rAlpha} vs #${rBravo}`);
+  const alphaRow = standings.find((s) => s.name === `Alpha ${STAMP}`);
+  const bravoRow = standings.find((s) => s.name === `Bravo ${STAMP}`);
+  ok('Alpha has one right bid', alphaRow.exact === 1, String(alphaRow.exact));
+  ok('Bravo has none', bravoRow.exact === 0, String(bravoRow.exact));
+  ok('Alpha was closest twice', alphaRow.closest === 2, String(alphaRow.closest));
   ok('Bravo outranks Charlie', rBravo < rCharlie, `#${rBravo} vs #${rCharlie}`);
   ok('all three are ranked', rCharlie < 999);
 
@@ -169,10 +174,22 @@ const STAMP = Date.now().toString().slice(-5);
   ok('2nd place matches the standings', second.trim() === top3[1], `${second.trim()} vs ${top3[1]}`);
   ok('3rd place matches the standings', third.trim() === top3[2], `${third.trim()} vs ${top3[2]}`);
   ok(
-    'it says how many guesses were accurate',
-    /accurate/i.test(await dp.locator('.dp-winner.rank-1 .dp-winner-score').innerText()),
+    'the big number is right bids',
+    /right bid/i.test(await dp.locator('.dp-winner.rank-1 .dp-winner-score').innerText()),
     (await dp.locator('.dp-winner.rank-1 .dp-winner-score').innerText()).replace(/\n/g, ' ')
   );
+  /* The "4 accurate answers" confusion that started v4.0.0: the big number is the count of
+     exact bids, and the closest calls are a separate, smaller line. */
+  const subLine1 = await dp.locator('.dp-winner.rank-1 .dp-winner-exact').innerText();
+  const topApi = standings[0];
+  ok(
+    'the big number is the exact-bid count',
+    (await dp.locator('.dp-winner.rank-1 .dp-winner-score strong').innerText()).trim() === String(topApi.exact),
+    `${topApi.exact} exact vs ${topApi.closest} closest`
+  );
+  ok('the small line carries the closest calls', /closest call/i.test(subLine1), subLine1.trim());
+  ok('the board is headed "right on the price"', /right on the price/i.test(shown));
+  ok('and it says a right bid is what wins', /right bid/i.test(shown));
   ok('the badges read 1st/2nd/3rd', (await dp.locator('.dp-winner.rank-1 .dp-winner-badge').innerText()).trim() === '1st');
   ok('how many players are sold is shown', /players sold/i.test(shown));
 

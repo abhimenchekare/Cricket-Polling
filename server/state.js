@@ -3,6 +3,7 @@
 const { q, one, scalar, logActivity } = require('./db');
 const { allSettings } = require('./settings');
 const ladder = require('./bidladder');
+const { exactWinners, closestGuess } = require('./ranking');
 
 /* ------------------------------------------------------------------ */
 /* Poll queries                                                       */
@@ -204,8 +205,8 @@ function rankBidGuesses(guesses, actualLakh) {
   });
   ranked.sort((a, b) => a.diffLakh - b.diffLakh || a.at - b.at || a.participantId - b.participantId);
 
-  // Ordinal ranking: the host always declares exactly three winners, so equal distances are
-  // separated by who locked their guess in first (the sort above) rather than sharing a rank.
+  // Ordinal ranking: equal distances are separated by who locked their guess in first (the sort
+  // above) rather than sharing a rank. Note this rank is information — only an exact bid wins.
   ranked.forEach((row, i) => {
     row.rank = i + 1;
     row.tiedOnDistance = ranked.some((o) => o !== row && o.diffLakh === row.diffLakh);
@@ -241,7 +242,9 @@ async function getBidResults(poll, participantId = null) {
 function buildBidResults(poll, guesses, participantId = null) {
   const actualLakh = poll.actual_lakh == null ? null : Number(poll.actual_lakh);
   const ranked = actualLakh == null ? [] : rankBidGuesses(guesses, actualLakh);
-  const winners = ranked.filter((r) => r.rank <= 3).slice(0, 3);
+  /* Only right-on-the-price bids win a player. Nobody exact -> no winners, just the closest. */
+  const winners = exactWinners(ranked);
+  const closest = winners.length ? null : closestGuess(ranked);
 
   let viewer = null;
   if (participantId) {
@@ -254,7 +257,7 @@ function buildBidResults(poll, guesses, participantId = null) {
         diffLabel: me.diffLabel,
         direction: me.direction,
         rank: me.rank,
-        isWinner: me.rank <= 3
+        isWinner: me.diffLakh === 0
       };
     }
   }
@@ -264,6 +267,8 @@ function buildBidResults(poll, guesses, participantId = null) {
     actualLakh,
     actualLabel: actualLakh == null ? null : ladder.label(actualLakh),
     totalGuesses: guesses.length,
+    exactCount: winners.length,
+    closest,
     winners: winners.map((w) => ({
       rank: w.rank,
       name: w.name,

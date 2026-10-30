@@ -219,8 +219,8 @@ async function cleanLeftovers() {
   await dp.waitForTimeout(800);
   const dpText = await dp.locator('body').innerText();
   ok(
-    'big screen shows the winners board',
-    /most accurate guesses/i.test(dpText) || /no player has been sold yet/i.test(dpText),
+    'big screen shows the right-bids board',
+    /right on the price/i.test(dpText) || /no player has been sold yet/i.test(dpText),
     dpText.replace(/\s+/g, ' ').slice(0, 90)
   );
   // with no guesses in the settled rounds the podium is legitimately empty — say so instead of blank
@@ -230,7 +230,7 @@ async function cleanLeftovers() {
     hasWinner || /nobody guessed yet|no player has been sold yet/i.test(dpText),
     dpText.replace(/\s+/g, ' ').slice(-90)
   );
-  ok('big screen talks about accurate guesses', /accurate|sold yet/i.test(dpText));
+  ok('big screen talks about right bids', /right bid|sold yet/i.test(dpText));
   ok('big screen does not name the player', !dpText.includes('Rohit'));
   await shot(dp, 'b6-display-winners.png');
 

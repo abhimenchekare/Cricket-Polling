@@ -92,10 +92,10 @@
       ${statBox('Sold price', sheet.revealed ? escapeHtml(p.actualLabel) : '—', '#f6c453')}
     </div>`;
 
-    /* --- winners --- */
+    /* --- winners: exact bids only --- */
     if (sheet.revealed && sheet.winners && sheet.winners.length) {
       html += `<div style="margin-bottom:16px">
-        <div style="font:700 11px/1 system-ui;letter-spacing:.12em;text-transform:uppercase;color:#8fa1bd;margin-bottom:8px">Winners</div>
+        <div style="font:700 11px/1 system-ui;letter-spacing:.12em;text-transform:uppercase;color:#8fa1bd;margin-bottom:8px">Right on the price</div>
         ${sheet.winners
           .map(
             (w) => `<div style="display:flex;gap:10px;align-items:center;padding:10px 12px;border-radius:12px;
@@ -107,6 +107,19 @@
             </div>`
           )
           .join('')}
+      </div>`;
+    } else if (sheet.revealed) {
+      const c = sheet.closest;
+      html += `<div style="margin-bottom:16px;padding:10px 12px;border-radius:12px;
+        background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);
+        font:600 13px system-ui;color:#8fa1bd">
+        No right bid on this player${
+          c
+            ? ` · closest was <strong style="color:#fff">${escapeHtml(c.name)}</strong> ${escapeHtml(
+                c.guessLabel
+              )} (${escapeHtml(c.diffLabel)} off)`
+            : ''
+        }
       </div>`;
     }
 
@@ -212,7 +225,13 @@
     setBusyState(true);
     try {
       const res = await API.post(`/api/admin/polls/${pollId}/actual`, { price: raw });
-      toast(`Sold price saved — ${res.actualLabel || raw}. Winners declared.`, 'ok');
+      const winners = (res.winners || []).length;
+      toast(
+        `Sold price saved — ${res.actualLabel || raw}. ${
+          winners ? `${winners} right bid${winners > 1 ? 's' : ''}.` : 'No right bid on this one.'
+        }`,
+        'ok'
+      );
       await load(pollId);
       window.App.confetti && window.App.confetti({ count: 40 });
     } catch (err) {

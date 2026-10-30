@@ -12,7 +12,7 @@ A complete live polling website for your office cricket auction, built to run **
 
 ---
 
-## What this app does (v3.9.2 — auction list + SHOUT)
+## What this app does (v4.0.0 — auction list + SHOUT)
 
 An office-cricket-auction companion for the audience's phones.
 
@@ -25,7 +25,7 @@ An office-cricket-auction companion for the audience's phones.
 - **Instant everywhere.** A push stream (SSE) delivers the round, the countdown, the guesses and the
   results to every phone and to the projector in ~250 ms. No refresh, no waiting for a poll tick.
 - **The admin's answer sheet.** For any round: who guessed what, how far off they were, their rank, and
-  everyone who hasn't guessed yet. Enter the sold price → the three closest guesses are declared and
+  everyone who hasn't guessed yet. Enter the sold price → everyone who nailed it is declared and
   the player is marked SOLD on the list with their price.
 - **There is no multiple-choice polling.** It was removed in v3.0.0 (see §4g).
 
@@ -176,12 +176,12 @@ remembered in your browser; default **10s**).
 
 ### Step 3 — enter the sold price
 
-When the hammer falls, type the price in **Enter the sold price**. That closes the round, ranks the
-guesses and declares the three closest on every phone and on the projector in ~250 ms. The player is
-then marked **SOLD 2.10 Cr** on the list, and the button is already pointing at the next name.
+When the hammer falls, type the price in **Enter the sold price**. That closes the round and declares
+everyone who guessed the price **exactly** — on the projector in ~250 ms. The player is then marked
+**SOLD 2.10 Cr** on the list, and the button is already pointing at the next name.
 
 **You cannot skip this.** If a round is live and no price is entered, SHOUT asks you first — because
-the three winners of that player would be lost.
+that player's result would be left hanging.
 
 ### The buttons around the shout panel
 
@@ -330,6 +330,58 @@ Proven with a **negative control**: with the fix disabled in the browser (Playwr
 interception), the participant's slider jumps `24 → 40` and the admin's `26 → 40` the moment somebody
 else votes. With the fix, both stay put.
 
+## 4b-septies. 🔢 "The board said 4 accurate answers but only 1 bid was right" (v3.9.3)
+
+Nothing was miscounted — the board is counting something different from what the word suggests, so
+the wording now says exactly what it counts.
+
+| The number | What it means |
+| --- | --- |
+| **Closest calls** (the big number) | how many players this person called **closest of everyone** — nearest to the sold price, even if it was 40 L away |
+| **Right on the price** (the small green pill) | how many players they nailed **to the lakh** — a truly exact bid |
+
+A worked example from four phones and four sold players:
+
+| Player | Sold | Asha | Bilal | Chetan | Divya |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 2.00 Cr | **2.00 Cr** (exact) | 1.75 Cr | 1.50 Cr | 1.00 Cr |
+| 2 | 3.40 Cr | **3.00 Cr** (closest) | 2.00 Cr | 1.50 Cr | — |
+| 3 | 5.60 Cr | **5.00 Cr** (closest) | 4.00 Cr | — | — |
+| 4 | 8.00 Cr | **7.00 Cr** (closest) | 6.00 Cr | — | — |
+
+Asha has **1 right bid** but **4 closest calls**, so the board shows `4 closest calls · 1 right on the
+price`. The three per-player winners (nearest, 2nd, 3rd) are unaffected — those really are decided by
+closeness alone.
+
+The admin ledger had the same trap: its `Accurate` column is now **Closest calls**, next to a
+**Right bid** column, so the two can never be read as the same thing again. `npm run test:display`
+adds checks that the two labels stay distinct.
+
+## 4b-octies. 🥇 The rule you chose: only an exact bid wins (v4.0.0)
+
+After the "the board said 4 accurate answers but only 1 bid was right" confusion, the rule changed:
+
+| Question | Answer |
+| --- | --- |
+| Who wins a **player**? | Only people who guessed the sold price **exactly**. Four exact guesses → four winners, in lock-in order. |
+| What if **nobody** was exact? | That player has **no winners**. The ledger still names the closest guess as information — "no right bid · closest was Rahul 2.25 Cr (25 L off)" — but it is not a prize. |
+| Who is **1st / 2nd / 3rd overall**? | Most **right bids**. Ties break on closest calls, then top-3 finishes, then smaller total miss, then alphabetical. |
+
+What changed on screen:
+
+- **Projector** — heading **"Right on the price"**, the big number is `right bids`, with `N closest calls`
+  underneath as the tie-break.
+- **Admin ledger** (`/admin/results`) — columns `Right bids`, `Closest calls`, `Top-3`, `Avg miss`; the
+  per-player column reads "no right bid · closest …" when nobody was exact.
+- **Guess sheet** — the green "Winners" list became **"Right on the price"**, and an amber panel appears
+  when the player had no exact bid.
+- **CSV** — `Right bids (exact)`, `Winner`, `Winner guess`, `Closest guess`, `Closest diff`.
+- **Admin shout panel** — after a sale it says either "right bid: Rahul" or "no right bid · closest was …".
+
+`npm run test:ranking` is the referee for all of it (31 checks): exact wins, nobody exact, five exact
+bids (earliest three take the podium), one right bid beating three near misses, and the tie-breaks.
+`npm run test:bid`, `test:ledger`, `test:e2e` and `test:display` were rewritten to the same rule.
+
 ## 4b-quater. 📱 The guess screen is one screen — no scrolling
 
 While a round is live, the phone shows **only the round**, fitted to a single screen:
@@ -372,8 +424,8 @@ The host never gets hurried. A round is a round on the phones; the price is a se
 1. **SHOUT** — the next player goes on the block (10 s by default, one tap to change).
 2. **Type the sold price** — the "Sold price for *player*" block sits under the shout button and
    stays there **after** the countdown ends, while the next players go up, even 20 minutes later.
-   Press *Declare the three winners* whenever the hammer actually falls.
-3. **Results ledger** (`/admin/results`) — all 70 players, what each sold for, who came 1st/2nd/3rd,
+   Press *Save price* whenever the hammer actually falls.
+3. **Results ledger** (`/admin/results`) — all 70 players, what each sold for, who called it exactly,
    and the overall leaderboard.
 
 ### Where every result lives
@@ -442,7 +494,7 @@ the audience on `/results` (`/api/standings`).
 
 ### Exports
 
-`/admin/results` → **CSV** gives one row per player with the three winners in their own columns,
+`/admin/results` → **CSV** gives one row per player with the right bids, the winner and the closest guess,
 plus totals (players, sold, awaiting price, guesses, total spent).
 
 ## 4c. Admin panel bouncing to the login page — fixed
@@ -518,9 +570,11 @@ slider. Slide to the hammer price → **Declare winners**.
 - The round closes and the results appear on every phone and on the projector instantly.
 - **Any** price can be entered, on or off the ladder (a player can sell for 1.10 Cr) — type it via the
   slider or send it straight to the API. Guesses must be on the ladder; the sold price need not be.
-- The **three closest guesses** win, ranked 🥇 🥈 🥉. Distance is measured on the ladder, so
-  `1.25 Cr` vs a `1.10 Cr` sale is "25 L over".
-- **Ties** are broken by who locked their guess in **first** — so there is always a clean 1st/2nd/3rd.
+- **Only an exact bid wins the player** (v4.0.0). Guess the price the player actually sold for and
+  you win that player. If four people guess it, all four are shown, in lock-in order.
+- **Nobody exact → no winner for that player.** The ledger and the admin screens then name the
+  closest guess as information ("closest was Rahul, 25 L off"), but it is not a prize.
+- Distance is measured on the ladder, so `1.25 Cr` vs a `1.10 Cr` sale is "25 L over".
 - Each participant sees their own guess, distance, direction and rank (even if they did not win).
 - Entered the wrong price? Slide again and **Update price & re-rank** — or **Clear price** to take the
   result back down.
@@ -606,8 +660,8 @@ GET /api/admin/polls/:id/guesses      (admin session required)
 - Export CSV and open the projector from the same sheet.
 - The sheet refreshes itself while the round is open, so the "not yet" count drops live.
 
-Scoring is unchanged: closest guess wins, ties go to whoever locked in first, top three are
-declared, and a guess that is wildly far away never wins (it is simply ranked last).
+Scoring: an exact bid wins the player, a near miss wins nothing (v4.0.0). The sheet still shows every
+guess and its distance, so the host can always explain why somebody won.
 
 ---
 
@@ -804,28 +858,28 @@ npm run test:routes                # every page + API route on the deployment
 npm run test:config                # vercel.json / rewrite / no-socket checks
 npm run test:perf                  # perceived load speed
 npm run test:vote-speed            # Lock-in latency (cold-function simulation)
-npm run test:ledger                # 70-player results: stored prices, top-3 winners, leaderboard
+npm run test:ledger                # 70-player results: stored prices, exact winners, leaderboard
 npm run test:ranking               # the scoring rule on its own (no DB needed)
 npm run test:phone-fit             # the phone guess card fits one screen, with no next-player hint
 npm run test:display               # the projector podium: 1st/2nd/3rd on the big screen
 npm run test:slider                # nobody else's vote moves your slider + the duck's batting loop
 ```
 
-**Current results (local, v3.9.2), all with zero failures — 17 suites, 507 checks:**
+**Current results (local, v4.0.0), all with zero failures — 17 suites, 545 checks:**
 
 | Suite | Checks | What it proves |
 | --- | --- | --- |
-| `e2e` | 117 | auth, poll CRUD, join, duplicate + post-deadline blocking, timers, visibility, reset, CSV |
-| `bid` | 49 | ladder steps, lakh storage, ranking, three winners |
+| `e2e` | 119 | auth, poll CRUD, join, duplicate + post-deadline blocking, timers, visibility, reset, CSV |
+| `bid` | 48 | ladder steps, lakh storage, ranking, exact-bid winners, no-winner case |
 | **`shout`** | **37** | paste → order → SHOUT → splash on the phone → sold price → SOLD → next SHOUT, plus undo/skip/guards |
 | `ui` | 33 | join, dashboard, projector, mobile layouts, auto-return from the confirmation |
 | `ui-bid` | 30 | the full slider round on an iPhone 13, incl. the bounce back to the poll |
 | **`vote-speed`** | **7** | Lock-in latency, measured warm **and** with every API call delayed 800 ms |
-| **`ledger`** | **32** | 3 rounds end to end: prices stored, 1st/2nd/3rd correct, late settlement, leaderboard, CSV |
-| **`ranking`** | **16** | the scoring rule itself, incl. 65-vs-60 accurate guesses over 70 players (no DB, no browser) |
+| **`ledger`** | **36** | 3 rounds end to end: prices stored, exact winners, the "nobody exact" case, late settlement, leaderboard, CSV |
+| **`ranking`** | **31** | the scoring rule itself: exact bids win, nobody-exact, 5-way exact, right-bid-beats-near-miss, ties (no DB, no browser) |
 | **`phone-fit`** | **25** | one-screen guess card, greeting + counters kept, no next-player hint, duck waiting screen |
 | **`slider`** | **22** | another person's vote never moves your slider (phone **and** admin), no name/price/rank after a round, the duck bats then gets bowled |
-| **`display`** | **20** | big screen: bat-and-ball reveal, then 1st/2nd/3rd place, no player name, fits 1920×1080 |
+| **`display`** | **27** | big screen: bat-and-ball reveal, then 1st/2nd/3rd by right bids, closest calls as the small line, fits 1920×1080 |
 | `ui-rapid` | 18 | 10s…2 min presets, remembered across reloads, used by the next SHOUT |
 | `ui-session` | 30 | admin sign-in/session/logout |
 | `live` | 10 | start→phone 241 ms, vote→second phone 679 ms, price→phone cleared 1346 ms, fallback polling |
@@ -910,4 +964,4 @@ role and base price, and the price you type when the hammer falls. That is all i
 
 ---
 
-*Cricket Auction Live Polling — v3.9.2 · Express + Postgres on Vercel · separate from the auction website.*
+*Cricket Auction Live Polling — v4.0.0 · Express + Postgres on Vercel · separate from the auction website.*

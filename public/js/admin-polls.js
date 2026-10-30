@@ -171,6 +171,13 @@
         <span class="mute-sm">· sold price not entered</span>
       </div>`;
     }
+    if (!(r.winners || []).length) {
+      const c = r.closest;
+      return `<div class="mini-row">
+        <span class="mini-label">No right bid</span>
+        ${c ? `<span class="mute-sm">· closest ${escapeHtml(c.name)} ${escapeHtml(c.diffLabel)} off</span>` : ''}
+      </div>`;
+    }
     return (r.winners || [])
       .map(
         (w) => `<div class="mini-row">

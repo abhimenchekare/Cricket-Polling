@@ -198,7 +198,11 @@ const PLAYER = `UI Player ${Date.now() % 100000}`;
   ok('sheet lists participants', /UI Tester/.test(sheetText), sheetText.slice(0, 80));
   ok('sheet shows the guess value', /Cr|L/.test(sheetText));
   ok('sheet shows who has not guessed yet', /Still missing/i.test(sheetText));
-  ok('sheet names the winners', /Winners/i.test(sheetText));
+  ok(
+    'sheet says who was right on the price, or that nobody was',
+    /Right on the price|No right bid/i.test(sheetText),
+    sheetText.replace(/\s+/g, ' ').slice(0, 120)
+  );
   await shot(admin, '11-guess-sheet.png');
   await admin.click('#gs-close');
   await admin.waitForTimeout(300);

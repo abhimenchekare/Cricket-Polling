@@ -41,6 +41,7 @@
     listEl.innerHTML = polls
       .map((p) => {
         const winner = p.results && p.results.winners ? p.results.winners[0] || null : null;
+        const closest = !winner && p.results ? p.results.closest || null : null;
         return `
         <div class="card" style="margin-bottom:12px">
           <div class="card-head">
@@ -58,6 +59,10 @@
                 )}</strong> · guessed ${escapeHtml(winner.guessLabel)} · ${escapeHtml(
                   winner.diffLabel
                 )} ${escapeHtml(winner.direction)}</div>`
+              : closest
+              ? `<div class="banner banner-plain" style="margin:10px 0">No right bid · closest was <strong>${escapeHtml(
+                  closest.name
+                )}</strong> ${escapeHtml(closest.diffLabel)} off</div>`
               : ''
           }
           <div class="results">${UI.resultsHtml(p.results, { max: 10 })}</div>

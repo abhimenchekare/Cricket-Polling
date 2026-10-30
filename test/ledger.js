@@ -80,11 +80,13 @@ const STAMP = Date.now().toString().slice(-5);
 
   /* ---------------- three guessers with known guesses ---------------- */
   const browser = await chromium.launch();
+  /* v4.0.0 rule: a player is won only by an exact bid. These four guesses are built so the
+     three rounds below cover both branches — one exact bid, nobody exact, and one exact bid. */
   const guessers = [
-    { name: `Ledger Closest ${STAMP}`, id: `LG-1-${STAMP}`, lakh: 225 }, // 25 L off a 2 Cr sale
-    { name: `Ledger Second ${STAMP}`, id: `LG-2-${STAMP}`, lakh: 250 }, // 50 L off
-    { name: `Ledger Third ${STAMP}`, id: `LG-3-${STAMP}`, lakh: 275 }, // 75 L off
-    { name: `Ledger Far ${STAMP}`, id: `LG-4-${STAMP}`, lakh: 600 } // 400 L off
+    { name: `Ledger Closest ${STAMP}`, id: `LG-1-${STAMP}`, lakh: 200 },
+    { name: `Ledger Second ${STAMP}`, id: `LG-2-${STAMP}`, lakh: 250 },
+    { name: `Ledger Third ${STAMP}`, id: `LG-3-${STAMP}`, lakh: 275 },
+    { name: `Ledger Far ${STAMP}`, id: `LG-4-${STAMP}`, lakh: 600 }
   ];
 
   for (const g of guessers) {
@@ -129,16 +131,19 @@ const STAMP = Date.now().toString().slice(-5);
   ok('the sold price is accepted', sold1.status === 200 && sold1.data.actualLakh === 200, String(sold1.data.actualLakh));
 
   const w1 = sold1.data.winners || [];
-  ok('three winners are declared', w1.length === 3, `${w1.length} winners`);
-  ok('1st is the closest guess', w1[0] && w1[0].name === guessers[0].name, w1[0] && w1[0].name);
-  ok('2nd is the next closest', w1[1] && w1[1].name === guessers[1].name, w1[1] && w1[1].name);
-  ok('3rd is the third closest', w1[2] && w1[2].name === guessers[2].name, w1[2] && w1[2].name);
-  ok('the farthest guesser is not a winner', !w1.some((w) => w.name === guessers[3].name));
+  /* 2.00 Cr sale, one person guessed exactly 2.00 Cr */
+  ok('the exact bid wins the player', w1.length === 1, `${w1.length} winner(s)`);
+  ok('and it is the person who nailed it', w1[0] && w1[0].name === guessers[0].name, w1[0] && w1[0].name);
+  ok('the winner is zero distance away', w1[0] && w1[0].diffLakh === 0, w1[0] && String(w1[0].diffLakh));
+  ok(
+    'close guesses do not win — second and third place are empty',
+    !w1.some((w) => w.name === guessers[1].name || w.name === guessers[2].name)
+  );
 
   const ledger1 = await api('/api/admin/ledger');
   const row1 = ledger1.data.rows.find((r) => r.name === players[0]);
   ok('the result is stored in the ledger', row1 && row1.settled && row1.soldLabel === '2.00 Cr', row1 && row1.soldLabel);
-  ok('the ledger keeps the three winners', row1 && row1.winners.length === 3);
+  ok('the ledger keeps the exact winner', row1 && row1.winners.length === 1, row1 && String(row1.winners.length));
   ok('the ledger records how many guessed', row1 && row1.guessCount === guessers.length, row1 && String(row1.guessCount));
 
   /* ---------------- round 2: the host is never on a clock ---------------- */
@@ -164,8 +169,11 @@ const STAMP = Date.now().toString().slice(-5);
     body: JSON.stringify({ price: '1.5 Cr' })
   });
   ok('the price can be entered after the countdown ended', latePrice.status === 200 && latePrice.data.actualLakh === 150);
-  // 1.5 Cr sale → 225 (75 off) beats 250 (100 off) beats 275 (125 off)
-  ok('and the winners are still correct', latePrice.data.winners[0].name === guessers[0].name, latePrice.data.winners[0].name);
+  /* 1.50 Cr sale and nobody guessed it: no winner, but the closest is still reported */
+  ok('nobody exact → no winners', (latePrice.data.winners || []).length === 0, `${(latePrice.data.winners || []).length}`);
+  console.log('     closest payload:', JSON.stringify(latePrice.data.closest));
+  ok('the closest guess is named instead', latePrice.data.closest && latePrice.data.closest.name === guessers[0].name, latePrice.data.closest && latePrice.data.closest.name);
+  ok('and its distance is shown', latePrice.data.closest && latePrice.data.closest.diffLakh === 50, latePrice.data.closest && String(latePrice.data.closest.diffLakh));
 
   /* ---------------- round 3: shout next WITHOUT a price, settle later ---------------- */
   console.log('\n3️⃣  Round 3 — shout past an unpriced player, settle it later');
@@ -190,20 +198,23 @@ const STAMP = Date.now().toString().slice(-5);
 
   const settledLate = await api(`/api/admin/polls/${lostRow.pollId}/actual`, {
     method: 'POST',
-    body: JSON.stringify({ price: '2.5 Cr' })
+    body: JSON.stringify({ price: '2.5 Cr' }) // guesser 2 guessed exactly 2.50 Cr
   });
   ok('that player can still be settled afterwards', settledLate.status === 200, String(settledLate.status));
   const fixed = (await api('/api/admin/ledger')).data.rows.find((r) => r.name === players[2]);
   ok('and the ledger then shows them SOLD', fixed && fixed.settled && fixed.soldLabel === '2.50 Cr', fixed && fixed.soldLabel);
-  ok('with their three winners', fixed && fixed.winners.length === 3);
+  ok('with the exact bid as the winner', fixed && fixed.winners.length === 1 && fixed.winners[0].name === guessers[1].name, fixed && fixed.winners.map((w) => w.name).join(','));
 
   /* ---------------- the leaderboard adds up ---------------- */
   console.log('\n4️⃣  Leaderboard');
   const led = await api('/api/admin/ledger');
   const standings = led.data.standings || [];
   const closest = standings.find((s) => s.name === guessers[0].name);
-  ok('the closest guesser leads', standings[0] && standings[0].name === guessers[0].name, standings[0] && standings[0].name);
-  ok('points are 3/2/1 per round', closest && closest.points >= 3, closest && String(closest.points));
+  const nailed = standings.find((s) => s.name === guessers[1].name);
+  ok('the person with a right bid and the most closest calls leads', standings[0] && standings[0].name === guessers[0].name, standings[0] && standings[0].name);
+  ok('right bids are counted per person', closest && closest.exact === 1 && nailed && nailed.exact === 1, `${closest && closest.exact} / ${nailed && nailed.exact}`);
+  ok('closest calls break the tie between them', closest.closest > nailed.closest, `${closest.closest} vs ${nailed.closest}`);
+  ok('everyone who guessed is on the board', standings.some((s) => s.name === guessers[2].name) && standings.some((s) => s.name === guessers[3].name));
 
   // the same maths must be visible to the audience
   const publicStandings = await fetch(`${BASE}/api/standings`).then((r) => r.json());
@@ -213,7 +224,8 @@ const STAMP = Date.now().toString().slice(-5);
   /* ---------------- CSV ---------------- */
   const csv = await fetch(`${BASE}/api/admin/ledger.csv`, { headers: H });
   const text = await csv.text();
-  ok('the ledger exports as CSV', csv.status === 200 && text.includes('1st (closest)'));
+  ok('the ledger exports as CSV', csv.status === 200 && text.includes('Right bids (exact)'), text.split('\n')[0].slice(0, 80));
+  ok('the CSV names who came closest when nobody was exact', text.includes('Closest guess'));
   ok('with a row per player', text.split('\n').length > 3);
 
   /* ---------------- admin page ---------------- */

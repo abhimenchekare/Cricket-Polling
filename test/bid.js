@@ -7,7 +7,7 @@
  *  2. participants drag the ladder and lock a guess
  *  3. guesses outside the ladder are rejected
  *  4. one guess per participant is enforced
- *  5. admin enters the hammer price → round closes, 3 winners are ranked correctly
+ *  5. admin enters the hammer price → round closes, the exact bids win (v4.0.0 rule)
  *  6. ties are broken by who locked in first
  *  7. the hammer price can be corrected and the ranking recomputes
  *  8. participants only see other guesses after the price is entered
@@ -169,20 +169,11 @@ async function main() {
 
   const st = (await admin.get('/api/admin/state')).data.polls.find((p) => p.id === pollId);
   const winners = st.results.winners;
-  ok('exactly 3 winners declared', winners.length === 3, String(winners.length));
-  ok('winner 1 is 1.00 Cr (10 L away)', winners[0].guessLakh === 100, JSON.stringify(winners[0]));
-  ok('winner 1 distance is 10 L', winners[0].diffLakh === 10, String(winners[0].diffLakh));
-  ok(
-    'winners 2 and 3 are the two 1.25 Cr guesses',
-    winners[1].guessLakh === 125 && winners[2].guessLakh === 125,
-    JSON.stringify(winners.map((w) => w.guessLakh))
-  );
-  ok(
-    'tie is broken by who guessed first',
-    winners[1].name === 'Bhavna' && winners[2].name === 'Diya',
-    `${winners[1].name} / ${winners[2].name}`
-  );
-  ok('ranks are 1,2,3', winners.map((w) => w.rank).join(',') === '1,2,3');
+  /* v4.0.0: nobody guessed 1.10 Cr, so this player has NO winner — only the closest is shown. */
+  ok('no exact bid → no winners declared', winners.length === 0, `${winners.length} winner(s)`);
+  ok('the closest guess is reported instead', st.results.closest && st.results.closest.guessLakh === 100, JSON.stringify(st.results.closest));
+  ok('the closest guess is 10 L away', st.results.closest.diffLakh === 10, String(st.results.closest.diffLakh));
+  ok('the closest guess is not dressed up as a win', st.results.closest.rank === undefined);
 
   section('Participant view after the reveal');
   const revealed = (await clients.a.get('/api/state')).data;
@@ -195,7 +186,7 @@ async function main() {
     `${closedPoll.results.actualLakh} / ${closedPoll.results.actualLabel}`
   );
   ok('viewer sees their own rank', closedPoll.results.viewer && closedPoll.results.viewer.rank === 1, JSON.stringify(closedPoll.results.viewer));
-  ok('viewer is marked a winner', closedPoll.results.viewer.isWinner === true);
+  ok('a near miss is not marked as a win', closedPoll.results.viewer.isWinner === false);
   const viewerD = (await clients.d.get('/api/state')).data.history.find((h) => h.id === pollId).results.viewer;
   ok('third place participant sees rank 3', viewerD && viewerD.rank === 3, JSON.stringify(viewerD));
   ok('distribution lists every guessed price', closedPoll.results.distribution.length === 3, String(closedPoll.results.distribution.length));
@@ -204,13 +195,14 @@ async function main() {
   const fix = await admin.post(`/api/admin/polls/${pollId}/actual`, { lakh: 125 });
   ok('price can be corrected', fix.status === 200);
   const fixed = (await admin.get('/api/admin/state')).data.polls.find((p) => p.id === pollId);
-  ok('exact guesses now win', fixed.results.winners[0].guessLakh === 125 && fixed.results.winners[0].diffLakh === 0);
-  ok('exact guesses are flagged', fixed.results.winners[0].direction === 'exact');
+  ok('the two exact guesses now win', fixed.results.winners.length === 2 && fixed.results.winners.every((w) => w.guessLakh === 125), JSON.stringify(fixed.results.winners.map((w) => w.guessLakh)));
+  ok('exact winners are flagged', fixed.results.winners.every((w) => w.diffLakh === 0 && w.direction === 'exact'));
   ok(
-    'the 1.00 Cr guess drops to third',
-    fixed.results.winners[2].guessLakh === 100,
+    'the 1.00 Cr guess is no longer a winner',
+    !fixed.results.winners.some((w) => w.guessLakh === 100),
     JSON.stringify(fixed.results.winners.map((w) => w.guessLakh))
   );
+  ok('and nobody is ranked 3rd as a winner', fixed.results.winners.length === 2);
 
   section('Clearing the price hides results again');
   const cleared = await admin.del(`/api/admin/polls/${pollId}/actual`);

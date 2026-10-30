@@ -586,6 +586,7 @@ router.post('/polls/:id/actual', async (req, res, next) => {
       actualLakh: lakhValue,
       actualLabel: ladder.label(lakhValue),
       winners: results.winners,
+      closest: results.closest || null,
       totalGuesses: results.totalGuesses,
       player: settledPlayer
         ? { id: settledPlayer.id, name: settledPlayer.name, status: settledPlayer.status }
@@ -631,6 +632,7 @@ router.get('/polls/:id/guesses', async (req, res, next) => {
       },
       revealed: sold != null,
       winners: results.winners,
+      closest: results.closest || null,
       // guessers first (rank order), then everyone still missing — that is the order the host reads
       participants: everyone
         .map((p) => {
@@ -1140,24 +1142,23 @@ router.get('/ledger', async (req, res, next) => {
   }
 });
 
-/** Ledger as a spreadsheet: one line per player, the three winners in their own columns. */
+/** Ledger as a spreadsheet: one line per player, the exact-bid winners in their own columns. */
 router.get('/ledger.csv', async (req, res, next) => {
   try {
     const { rows, summary } = await ledger.buildLedger();
     const head = [
       '#', 'Player', 'Role', 'Base price', 'Status', 'Sold for', 'Guesses',
-      '1st (closest)', '1st guess', '1st diff',
-      '2nd', '2nd guess', '2nd diff',
-      '3rd', '3rd guess', '3rd diff'
+      'Right bids (exact)', 'Winner', 'Winner guess',
+      'Closest guess', 'Closest diff'
     ];
     const lines = [head];
     for (const r of rows) {
-      const w = [0, 1, 2].map((i) => r.winners[i] || {});
+      const w = r.winners[0] || {};
+      const c = r.closest || {};
       lines.push([
         r.position, r.name, r.role || '', r.baseLabel || '', r.status, r.soldLabel || '', r.guessCount,
-        w[0].name || '', w[0].guessLabel || '', w[0].diffLabel ? `${w[0].diffLabel} off` : '',
-        w[1].name || '', w[1].guessLabel || '', w[1].diffLabel ? `${w[1].diffLabel} off` : '',
-        w[2].name || '', w[2].guessLabel || '', w[2].diffLabel ? `${w[2].diffLabel} off` : ''
+        r.winners.length, w.name || (r.settled ? 'no exact bid' : ''), w.guessLabel || '',
+        c.name || '', c.diffLabel ? `${c.diffLabel} off` : ''
       ]);
     }
     lines.push([]);

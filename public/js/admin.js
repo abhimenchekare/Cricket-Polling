@@ -146,8 +146,16 @@
             ? `<div class="banner banner-plain ${soldPriceMissing ? '' : 'banner-ok'}" style="margin-top:12px">
                  ${
                    soldPriceMissing
-                     ? `Enter what <strong>${escapeHtml(block.name)}</strong> actually sold for to declare the three winners — they cannot guess the next player until you do.`
-                     : `Sold for <strong>${escapeHtml(live.actualLabel || '')}</strong> · winners declared. Shout the next player when ready.`
+                     ? `Enter what <strong>${escapeHtml(block.name)}</strong> actually sold for to settle the round — they cannot guess the next player until you do.`
+                     : `Sold for <strong>${escapeHtml(live.actualLabel || '')}</strong> · ${
+                         (live.results && live.results.winners && live.results.winners.length)
+                           ? `right bid: <strong>${escapeHtml(live.results.winners[0].name)}</strong> ${
+                               live.results.winners.length > 1 ? `and ${live.results.winners.length - 1} more` : ''
+                             }`
+                           : `no right bid · closest was <strong>${escapeHtml(
+                               (live.results && live.results.closest && live.results.closest.name) || '—'
+                             )}</strong>`
+                       }. Shout the next player when ready.`
                  }
                </div>`
             : ''
