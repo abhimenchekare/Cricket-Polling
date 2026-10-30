@@ -80,7 +80,10 @@ function pct(list, p) {
   // navigation abort is expected there — don't let it kill the measurement
   await page.goto(`${BASE}/poll`, { waitUntil: 'domcontentloaded' }).catch(() => {});
   await page
-    .waitForSelector('#poll-question, .poll-question, #no-poll, .empty-state', { timeout: PAGE_BUDGET * 3 })
+    // whatever the participant actually sees: a live round, or the "waiting for the host" card
+    .waitForSelector('#poll-area > *, #poll-question, .poll-question, #no-poll, .empty-state', {
+      timeout: PAGE_BUDGET * 3
+    })
     .catch(() => {});
   const pollShown = Date.now() - tPoll;
   ok(`poll screen usable under ${PAGE_BUDGET} ms`, pollShown < PAGE_BUDGET, `${pollShown} ms`);

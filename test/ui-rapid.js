@@ -36,6 +36,8 @@ const watch = (page, tag) => {
   });
 };
 
+const STAMP = Date.now().toString().slice(-5);
+
 (async () => {
   console.log(`\n⚡ Round length → ${BASE}\n${'='.repeat(54)}`);
 
@@ -95,6 +97,14 @@ const watch = (page, tag) => {
   );
 
   console.log('\n📣  And the next SHOUT uses it');
+  // the queue must not be empty, or there is nobody to shout (earlier runs may have used it up)
+  const roster = (await api('/api/admin/players')).data;
+  if (!roster.counts.queued) {
+    await api('/api/admin/players', {
+      method: 'POST',
+      body: JSON.stringify({ names: `Rapid Preset ${STAMP}, Batter, 1 Cr` })
+    });
+  }
   const shouted = await api('/api/admin/shout', { method: 'POST', body: JSON.stringify({ timerSeconds: 15 }) });
   ok('a shout opens a round', shouted.status === 201, JSON.stringify(shouted.data && shouted.data.error));
   ok('with the 15 second countdown', shouted.data.poll.timerSeconds === 15, String(shouted.data.poll && shouted.data.poll.timerSeconds));
@@ -113,6 +123,14 @@ const watch = (page, tag) => {
   await api('/api/admin/shout/undo', { method: 'POST', body: JSON.stringify({ confirm: true }) }).catch(() => {});
 
   await browser.close();
+
+  /* only the player this run created, never anything the host loaded */
+  for (const pl of (await api('/api/admin/players')).data.players) {
+    if (pl.name === `Rapid Preset ${STAMP}`) await api(`/api/admin/players/${pl.id}`, { method: 'DELETE' });
+  }
+  for (const pl of (await api('/api/admin/state')).data.polls) {
+    if ((pl.playerName || '') === `Rapid Preset ${STAMP}`) await api(`/api/admin/polls/${pl.id}`, { method: 'DELETE' });
+  }
 
   console.log('\n' + '='.repeat(54));
   console.log(`  Round length: ${pass} passed, ${fail} failed`);

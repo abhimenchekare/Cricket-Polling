@@ -14,6 +14,7 @@
   const clockEl = document.getElementById('dp-clock');
   const urlEl = document.getElementById('dp-url');
   const hintEl = document.getElementById('dp-hint');
+  const leadersEl = document.getElementById('dp-leaders');
 
   function serverNow() {
     return Date.now() + clockOffset;
@@ -39,13 +40,87 @@
       hiddenMultiplier: 2,
       onData: (payload) => {
         clockOffset = payload.serverTime - Date.now();
+        const prevSold = state && state.poll ? state.poll.results && state.poll.results.actualLakh : null;
         state = payload;
         render();
+        const nowSold = payload.poll && payload.poll.results ? payload.poll.results.actualLakh : null;
+        if (nowSold && nowSold !== prevSold) loadLeaders(true);
       }
     });
 
     setInterval(tick, 200);
     setInterval(renderClock, 1000);
+    loadLeaders(true);
+    setInterval(() => loadLeaders(false), 10000);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 🏆 Overall leaders — who has guessed the most players accurately.   */
+  /*    Always on the big screen, under the live round.                  */
+  /* ------------------------------------------------------------------ */
+
+  let leaders = null;
+  let leadersAt = 0;
+  let lastLeaderKey = '';
+
+  async function loadLeaders(force) {
+    if (!leadersEl) return;
+    if (!force && Date.now() - leadersAt < 9000) return;
+    leadersAt = Date.now();
+    try {
+      const data = await API.get('/api/standings');
+      leaders = data && data.standings ? data : null;
+      renderLeaders();
+      if (force && !lastLeaderKey && leaders && leaders.rounds) confettiOnce();
+    } catch {
+      /* the strip simply stays as it was */
+    }
+  }
+
+  let celebrated = false;
+  function confettiOnce() {
+    if (celebrated) return;
+    celebrated = true;
+  }
+
+  function renderLeaders() {
+    if (!leadersEl) return;
+    if (!leaders || !leaders.rounds || !leaders.standings.length) {
+      leadersEl.innerHTML = '';
+      leadersEl.classList.remove('is-on');
+      return;
+    }
+    const top = leaders.standings.slice(0, 3);
+    const key = top.map((s) => `${s.rank}:${s.name}:${s.nearest}`).join('|');
+    leadersEl.classList.add('is-on');
+    leadersEl.innerHTML = `
+      <div class="dp-leaders-head">
+        <span class="dp-leaders-title">Most accurate guesses</span>
+        <span class="dp-leaders-sub">${leaders.rounds} of ${leaders.players} players sold</span>
+      </div>
+      <div class="dp-leaders-row">
+        ${top
+          .map(
+            (s) => `
+          <div class="dp-leader rank-${s.rank}">
+            <div class="dp-leader-medal">${s.rank === 1 ? '1st' : s.rank === 2 ? '2nd' : '3rd'}</div>
+            <div class="dp-leader-body">
+              <div class="dp-leader-name">${escapeHtml(s.name)}</div>
+              <div class="dp-leader-score">
+                <strong>${s.nearest}</strong> accurate
+                ${s.exact ? `<span class="dp-leader-exact">${s.exact} exact</span>` : ''}
+              </div>
+            </div>
+          </div>`
+          )
+          .join('')}
+      </div>`;
+
+    /* a leader change is worth a small celebration on the big screen */
+    if (lastLeaderKey && key !== lastLeaderKey && lastLeaderKey.split(':')[0] !== key.split(':')[0]) {
+      window.App.confetti(1800);
+    }
+    lastLeaderKey = key;
   }
 
   function renderClock() {

@@ -72,8 +72,17 @@ const STAMP = Date.now().toString().slice(-5);
   /* ------------------------- one measured submission ------------------------- */
   async function measure({ delayMs = 0, employeeId, label }) {
     await closeLive();
-    const shout = await api('/api/admin/shout', { method: 'POST', body: JSON.stringify({ timerSeconds: 120 }) });
-    const pollId = shout.data.poll.id;
+    // each round eats one queued player — make sure there is always one to shout
+    const queue = (await api('/api/admin/players')).data;
+    if (!queue.counts.queued) {
+      await api('/api/admin/players', {
+        method: 'POST',
+        body: JSON.stringify({ names: `Speed Player ${STAMP}-${label}, Batter, 2 Cr` })
+      });
+    }
+    const shouted = await api('/api/admin/shout', { method: 'POST', body: JSON.stringify({ timerSeconds: 120 }) });
+    if (shouted.status !== 201) throw new Error('shout failed: ' + JSON.stringify(shouted.data));
+    const pollId = shouted.data.poll.id;
 
     const ctx = await browser.newContext({ ...devices['iPhone 13'] });
     const page = await ctx.newPage();
