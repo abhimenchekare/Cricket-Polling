@@ -12,7 +12,7 @@ A complete live polling website for your office cricket auction, built to run **
 
 ---
 
-## What this app does (v3.3.1 — auction list + SHOUT)
+## What this app does (v3.5.0 — auction list + SHOUT)
 
 An office-cricket-auction companion for the audience's phones.
 
@@ -224,7 +224,7 @@ player is shouted. There is a `Stay here` button if someone wants to read it fir
 
 Countdowns under a minute show as plain seconds (`15s`, `8s`); longer ones stay `mm:ss`.
 
-## 4b-bis. ⚡ The Lock-in button answers in ~100 ms (v3.3.1)
+## 4b-bis. ⚡ The Lock-in button answers in ~100 ms (v3.5.0)
 
 The complaint: *"when they select bid submit, it takes 3-4 seconds."* Three separate delays were
 stacked on top of each other, and none of them were the database.
@@ -250,6 +250,38 @@ all. The test enforces it — if a future change reintroduces a blocking call on
 The confirmation document itself is also prefetched while the round is open, so the tap has nothing
 left to download.
 
+## 4b-quater. 📱 The guess screen is one screen — no scrolling
+
+While a round is live, the phone shows **only the round**, fitted to a single screen:
+
+```
+┌─────────────────────────────────────┐
+│ 🏏  event name        ● LIVE   [→]  │
+│ 👥 12 participants   🎯 0 guesses   │
+│ ┌─────────────────────────────────┐ │
+│ │ BID RANGE  ● LIVE         09:55 │ │  ← countdown on the top row
+│ │ [PLAYER]  Suryakumar Yadav      │ │  ← full name, wraps rather than truncates
+│ │ 🎯 0 guesses                    │ │
+│ │           10.0 Cr               │ │
+│ │   −  ▬▬▬▬▬●▬▬▬▬▬▬▬▬▬▬▬▬▬  +   │ │  ← slider starts at a sane price
+│ │   20 L   1 Cr   10 Cr   30 Cr   │ │
+│ │  [20 L][1.00 Cr][5.00 Cr][10 Cr]│ │  ← one swipeable strip of shortcuts
+│ │ ┌─────────────────────────────┐ │ │
+│ │ │      Lock in 10.0 Cr        │ │ │  ← always above the fold
+│ │ └─────────────────────────────┘ │ │
+│ └─────────────────────────────────┘ │
+└─────────────────────────────────────┘
+```
+
+Measured on an iPhone 13 and on a 360×640 phone: the page height equals the screen height — **zero
+scroll**, slider visible, Lock in button visible. The greeting card, the results/archive cards and
+the page footer fold away while a round runs, and come back once the guess is locked in.
+
+**No "next player" on the audience phone.** The ⏭ hint that used to leak the upcoming name is gone;
+the phone only ever shows the player who is actually on the block (the one they can guess on).
+
+`npm run test:phone-fit` enforces all of it (13 checks).
+
 ## 4b-ter. 🏆 Running 70 players: the hammer price, and who won
 
 The host never gets hurried. A round is a round on the phones; the price is a separate step with
@@ -273,6 +305,36 @@ The host never gets hurried. A round is a round on the phones; the price is a se
 | The player's fate | `auction_players.status` = `sold` / `unsold` / `skipped`, plus `sold_lakh` |
 | The winners | **derived on read** from the two above, so correcting a mistyped price re-ranks instantly |
 
+### How the winners are decided — the exact rule
+
+**Per player** — the server measures how far every guess is from the hammer price:
+
+```
+difference = |guess − actual sold price|
+sort by difference, smallest first   →  1st, 2nd, 3rd
+equal difference                     →  whoever locked their guess in first
+```
+
+So if a player sells for **2.00 Cr** and four people guessed 2.00 / 2.25 / 2.50 / 3.00 Cr, the
+person who said 2.00 Cr is that round's winner, then 2.25, then 2.50.
+
+**Overall (the final result)** — a participant's score is **how many players they guessed most
+accurately** (i.e. were the closest of everyone). Not points, not averages:
+
+```
+accurate =  number of players where this person's guess was the closest of all
+exact    =  number of players where the guess matched the sold price to the lakh
+top3     =  number of players where this person finished 1st, 2nd or 3rd
+sort:  accurate DESC  →  exact DESC  →  top3 DESC  →  2nd DESC  →  3rd DESC
+       →  total distance ASC  →  name
+```
+
+With 70 players: **65 accurate guesses beat 60**, full stop. Only sold (priced) players count; a
+round with no hammer price adds nothing to anybody.
+
+The rule lives in **one file**, `server/ranking.js`, with no database or framework imports, so it can
+be tested on its own: `npm run test:ranking` (16 checks, including the 65-vs-60 case).
+
 ### How the winners are decided
 
 ```
@@ -294,8 +356,8 @@ intact, and you can settle them later from `/admin/results` → **Enter price**.
 
 ### Overall leaderboard
 
-1st closest = 3 points · 2nd = 2 · 3rd = 1, summed across every player sold. Ties break on 1st
-places, then on total distance. It is on `/admin/results`, on the projector via `/display`, and for
+Ranked by **accurate guesses** — how many players each person called closest of everyone. Ties break
+on exact hits, then top-3 finishes, then the smaller total miss. (Points are shown for context only.) It is on `/admin/results`, on the projector via `/display`, and for
 the audience on `/results` (`/api/standings`).
 
 ### Exports
@@ -663,9 +725,11 @@ npm run test:config                # vercel.json / rewrite / no-socket checks
 npm run test:perf                  # perceived load speed
 npm run test:vote-speed            # Lock-in latency (cold-function simulation)
 npm run test:ledger                # 70-player results: stored prices, top-3 winners, leaderboard
+npm run test:ranking               # the scoring rule on its own (no DB needed)
+npm run test:phone-fit             # the phone guess card fits one screen, with no next-player hint
 ```
 
-**Current results (local, v3.3.1), all with zero failures:**
+**Current results (local, v3.5.0), all with zero failures:**
 
 | Suite | Checks | What it proves |
 | --- | --- | --- |
@@ -676,6 +740,8 @@ npm run test:ledger                # 70-player results: stored prices, top-3 win
 | `ui-bid` | 28 | the full slider round on an iPhone 13, incl. the bounce back to the poll |
 | **`vote-speed`** | **7** | Lock-in latency, measured warm **and** with every API call delayed 800 ms |
 | **`ledger`** | **32** | 3 rounds end to end: prices stored, 1st/2nd/3rd correct, late settlement, leaderboard, CSV |
+| **`ranking`** | **16** | the scoring rule itself, incl. 65-vs-60 accurate guesses over 70 players (no DB, no browser) |
+| **`phone-fit`** | **13** | one-screen guess card: no scroll, slider + button visible, no next-player hint, long names |
 | `ui-rapid` | 18 | 10s…2 min presets, remembered across reloads, used by the next SHOUT |
 | `ui-session` | 30 | admin sign-in/session/logout |
 | `live` | 10 | start→phone 276 ms, vote→projector 123 ms, price→winners 244 ms, fallback polling |
@@ -760,4 +826,4 @@ role and base price, and the price you type when the hammer falls. That is all i
 
 ---
 
-*Cricket Auction Live Polling — v3.3.1 · Express + Postgres on Vercel · separate from the auction website.*
+*Cricket Auction Live Polling — v3.5.0 · Express + Postgres on Vercel · separate from the auction website.*

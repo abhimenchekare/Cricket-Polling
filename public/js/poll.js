@@ -176,17 +176,13 @@
         'guesses'
       )}</span>
       ${p ? '' : '<span class="pill pill-draft">Waiting for the next shout</span>'}
-      ${
-        state.auction && state.auction.upNext && p
-          ? `<span class="pill pill-ghost">⏭&nbsp;next: ${window.App.escapeHtml(state.auction.upNext)}</span>`
-          : ''
-      }
     `;
   }
 
   function renderPoll() {
     const p = state.poll;
     if (!p) {
+      document.body.classList.remove('guess-focus');
       els.pollArea.innerHTML = `
         <div class="card card-hero waiting">
           <div class="waiting-icon">⏳</div>
@@ -206,25 +202,34 @@
 
   function bidHead(p) {
     return `
-      <div class="poll-meta">
-        <span class="eyebrow">${escapeHtml(p.category || 'Bid range')}</span>
-        <div class="row" style="gap:8px">
-          <span class="pill pill-gold">🎯 Guess the price</span>
+      <div class="poll-meta bid-meta">
+        <div class="row" style="gap:6px;align-items:center">
+          <span class="eyebrow">${escapeHtml(p.category || 'Bid range')}</span>
           ${statusPill(p.status)}
         </div>
-      </div>
-      ${p.playerName ? `<div class="bid-player"><span class="bid-player-tag">PLAYER</span>${escapeHtml(p.playerName)}</div>` : ''}
-      <h2 class="poll-question">${escapeHtml(p.question)}</h2>
-      <div class="row-between" style="gap:12px;margin-bottom:16px">
-        <div class="timer ${p.status === 'active' ? '' : 'is-urgent'}" id="timer" data-state="${p.status}">
+        <div class="timer timer-inline ${p.status === 'active' ? '' : 'is-urgent'}" id="timer" data-state="${p.status}">
           <div class="timer-ring" id="timer-ring" style="--pct:100"><span>⏱</span></div>
           <span id="timer-text">--:--</span>
         </div>
-        <div class="vote-count">🎯 <strong id="vote-count-num">${p.totalVotes}</strong> ${window.App.plural(p.totalVotes, 'guess', 'guesses')}</div>
-      </div>`;
+      </div>
+      <div class="bid-head">
+        ${
+          p.playerName
+            ? `<div class="bid-player"><span class="bid-player-tag">PLAYER</span>${escapeHtml(p.playerName)}</div>`
+            : ''
+        }
+        <h2 class="poll-question${p.playerName ? ' sr-only' : ''}">${escapeHtml(p.question)}</h2>
+      </div>
+      <div class="vote-count bid-guesscount">🎯 <strong id="vote-count-num">${p.totalVotes}</strong> ${window.App.plural(
+        p.totalVotes,
+        'guess',
+        'guesses'
+      )}</div>`;
   }
 
   function renderBidPoll(p) {
+    /* One screen, no scrolling: the header, greeting and archive fold away while a round is live. */
+    document.body.classList.toggle('guess-focus', p.status !== 'closed' && !p.viewer.hasVoted);
     const head = bidHead(p);
     const ladder = bidLadder();
 
@@ -277,7 +282,6 @@
       <div class="card card-hero poll-card bid-card">${head}
         <div class="bid-slider-wrap">
           <div class="bid-value" id="bid-value">${escapeHtml(ladder[startIndex] ? ladder[startIndex].label : '—')}</div>
-          <div class="mute-sm center" style="margin-bottom:10px">Slide to your guess — drag the handle or use − / +</div>
 
           <div class="bid-track-row">
             <button class="bid-nudge" id="bid-minus" aria-label="Lower the guess">−</button>
@@ -306,7 +310,7 @@
             Lock in <span id="bid-btn-label">${escapeHtml(ladder[startIndex] ? ladder[startIndex].label : '')}</span>
           </button>
         </div>
-        <p class="mute-sm center" style="margin-top:10px">Closest guess to the sold price wins. You can guess once.</p>
+        <p class="mute-sm center bid-fineprint">Closest to the sold price wins · one guess per player</p>
       </div>`;
 
     wireBid(p, startIndex);

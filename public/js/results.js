@@ -97,7 +97,7 @@
     });
   }
 
-  /* 🏆 Overall leaderboard — 1st closest = 3 points, 2nd = 2, 3rd = 1, across every player sold. */
+  /* Overall leaderboard — ranked by how many players each person called nearest (1st of everyone). */
   let lastStandingsAt = 0;
   async function loadStandings(force) {
     if (!standingsEl) return;
@@ -119,13 +119,13 @@
         <div class="card-head">
           <div>
             <div class="eyebrow">🏆 Leaderboard</div>
-            <div class="card-title" style="margin-top:4px">Closest to the sold price</div>
+            <div class="card-title" style="margin-top:4px">Most accurate guesses wins</div>
           </div>
           <span class="pill pill-gold">${data.rounds} ${data.rounds === 1 ? 'player' : 'players'} sold</span>
         </div>
         <div class="table-wrap">
           <table class="table">
-            <thead><tr><th>#</th><th>Who</th><th>1st</th><th>2nd</th><th>3rd</th><th>Points</th></tr></thead>
+            <thead><tr><th>#</th><th>Who</th><th>Accurate</th><th>Top-3</th><th>Exact</th></tr></thead>
             <tbody>
               ${data.standings
                 .slice(0, 10)
@@ -133,10 +133,9 @@
                   (s) => `<tr>
                     <td><strong style="color:${medal[s.rank - 1] || 'inherit'}">${s.rank}</strong></td>
                     <td><strong>${escapeHtml(s.name)}</strong></td>
-                    <td>${s.firsts || '·'}</td>
-                    <td>${s.seconds || '·'}</td>
-                    <td>${s.thirds || '·'}</td>
-                    <td><strong>${s.points}</strong></td>
+                    <td><strong style="color:var(--gold-300,#ffd166)">${s.nearest}</strong></td>
+                    <td>${s.top3 || '·'}</td>
+                    <td>${s.exact || '·'}</td>
                   </tr>`
                 )
                 .join('')}

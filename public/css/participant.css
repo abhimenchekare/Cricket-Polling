@@ -700,3 +700,212 @@
   font: 600 clamp(13px, 3.6vw, 16px) / 1.4 system-ui, sans-serif;
   color: rgba(255, 255, 255, 0.72);
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Guess screen: the whole round on ONE phone screen, no scrolling.
+   While a round is live the page drops the greeting/archive and the countdown,
+   player, slider and Lock in button all fit above the fold.
+   ───────────────────────────────────────────────────────────────────────────── */
+body.guess-focus .page {
+  padding-top: 0;
+}
+
+body.guess-focus .topbar {
+  padding: 8px 14px;
+  gap: 8px;
+}
+
+body.guess-focus .topbar .brand-mark {
+  width: 30px;
+  height: 30px;
+  font-size: 16px;
+  border-radius: 9px;
+}
+
+body.guess-focus .topbar .brand-title {
+  font-size: 13.5px;
+  line-height: 1.15;
+  max-width: 42vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.guess-focus .topbar .brand-sub {
+  display: none;
+}
+
+/* the greeting card and the page footer are pure noise mid-round */
+body.guess-focus .greet,
+body.guess-focus .page > p.mute-sm,
+body.guess-focus .wrap > p.mute-sm,
+body.guess-focus main > p.mute-sm {
+  display: none;
+}
+
+body.guess-focus #stats-bar {
+  margin-top: 8px !important;
+  gap: 6px !important;
+}
+
+body.guess-focus #stats-bar .pill {
+  font-size: 11.5px;
+  padding: 3px 9px;
+}
+
+body.guess-focus .wrap {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+body.guess-focus #results-area,
+body.guess-focus #history-area {
+  display: none;
+}
+
+body.guess-focus .poll-card {
+  padding: 14px 14px 12px;
+  margin-top: 8px;
+}
+
+body.guess-focus .poll-meta {
+  margin-bottom: 6px;
+  gap: 6px;
+}
+
+body.guess-focus .poll-meta .pill {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+/* player name + countdown share one line */
+.bid-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bid-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.bid-head .bid-player .bid-player-tag {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  align-self: center;
+}
+
+.bid-head .bid-player {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  font-size: clamp(18px, 5.6vw, 25px);
+  line-height: 1.15;
+  /* long names wrap onto a second line instead of being cut off */
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* the countdown must never be overlapped by a long player name */
+.bid-head .timer-inline {
+  position: relative;
+  z-index: 2;
+  background: #0d1b36;
+  border-radius: 999px;
+  padding-left: 2px;
+}
+
+.bid-head .poll-question {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+}
+
+.timer-inline {
+  flex: 0 0 auto;
+  gap: 6px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.timer-inline .timer-ring {
+  width: 30px;
+  height: 30px;
+  font-size: 13px;
+}
+
+.bid-guesscount {
+  font-size: 12px;
+  margin: 0 0 2px;
+  text-align: left;
+}
+
+body.guess-focus .bid-value {
+  font-size: clamp(30px, 9vw, 40px);
+  line-height: 1.05;
+  margin: 2px 0 6px;
+}
+
+body.guess-focus .bid-track-row {
+  margin-top: 2px;
+}
+
+body.guess-focus .bid-range {
+  height: 38px;
+}
+
+/* chips: one swipeable row instead of three stacked rows */
+body.guess-focus .bid-chips {
+  flex-wrap: nowrap;
+  mask-image: linear-gradient(to right, #000 88%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, #000 88%, transparent 100%);
+  overflow-x: auto;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 6px 2px 2px;
+  margin-top: 6px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+body.guess-focus .bid-chips::-webkit-scrollbar {
+  display: none;
+}
+
+body.guess-focus .bid-chip {
+  flex: 0 0 auto;
+  padding: 7px 11px;
+  font-size: 12.5px;
+}
+
+body.guess-focus .bid-slider-wrap {
+  padding-bottom: 0;
+}
+
+body.guess-focus .sticky-action {
+  position: static;
+  padding: 10px 0 0;
+  margin-top: 4px;
+  background: none;
+  backdrop-filter: none;
+}
+
+body.guess-focus .sticky-action .btn-lg {
+  padding: 13px 18px;
+  font-size: 16px;
+  min-height: 52px;
+}
+
+body.guess-focus .bid-fineprint {
+  margin-top: 6px !important;
+  font-size: 11px;
+}

@@ -15,29 +15,9 @@
 
 const { q } = require('./db');
 const ladder = require('./bidladder');
+const { rankGuesses, buildStandings } = require('./ranking');
 
 /** Rank guesses for one round: closest = 1st, then 2nd, 3rd. Ties go to whoever locked first. */
-function rankGuesses(guesses, actualLakh) {
-  const actual = Number(actualLakh);
-  return guesses
-    .map((g) => {
-      const guess = Number(g.guess_lakh);
-      return {
-        participantId: Number(g.participant_id),
-        name: g.name,
-        employeeId: g.employee_id,
-        guessLakh: guess,
-        guessLabel: ladder.label(guess),
-        diffLakh: Math.abs(guess - actual),
-        diffLabel: ladder.label(Math.abs(guess - actual)),
-        direction: guess === actual ? 'exact' : guess > actual ? 'over' : 'under',
-        at: Number(g.created_at)
-      };
-    })
-    .sort((a, b) => a.diffLakh - b.diffLakh || a.at - b.at || a.participantId - b.participantId)
-    .map((row, i) => ({ ...row, rank: i + 1 }));
-}
-
 /** Every player on the auction list, with their stored result and their three winners. */
 async function buildLedger() {
   const players = await q(
@@ -123,55 +103,4 @@ async function buildLedger() {
  * Overall standings: a 1st place is worth 3 points, 2nd 2, 3rd 1 — the "closest to the bid" rule
  * applied across every player sold so far. Ties break on 1st places, then on total distance.
  */
-function buildStandings(rows) {
-  const table = new Map();
-
-  for (const row of rows) {
-    if (!row.settled || !row.ranked || !row.ranked.length) continue;
-    for (const w of row.ranked.slice(0, 3)) {
-      const key = w.participantId;
-      if (!table.has(key)) {
-        table.set(key, {
-          participantId: key,
-          name: w.name,
-          employeeId: w.employeeId,
-          firsts: 0,
-          seconds: 0,
-          thirds: 0,
-          rounds: 0,
-          exact: 0,
-          totalDiffLakh: 0
-        });
-      }
-      const entry = table.get(key);
-      entry.rounds += 1;
-      entry.totalDiffLakh += w.diffLakh;
-      if (w.direction === 'exact') entry.exact += 1;
-      if (w.rank === 1) entry.firsts += 1;
-      else if (w.rank === 2) entry.seconds += 1;
-      else entry.thirds += 1;
-    }
-  }
-
-  return [...table.values()]
-    .map((entry) => ({
-      ...entry,
-      points: entry.firsts * 3 + entry.seconds * 2 + entry.thirds * 1,
-      wins: entry.firsts + entry.seconds + entry.thirds,
-      avgDiffLakh: entry.rounds ? Math.round(entry.totalDiffLakh / entry.rounds) : 0
-    }))
-    .map((entry) => ({
-      ...entry,
-      avgDiffLabel: entry.avgDiffLakh ? ladder.label(entry.avgDiffLakh) : null
-    }))
-    .sort(
-      (a, b) =>
-        b.points - a.points ||
-        b.firsts - a.firsts ||
-        a.totalDiffLakh - b.totalDiffLakh ||
-        a.name.localeCompare(b.name)
-    )
-    .map((entry, i) => ({ ...entry, rank: i + 1 }));
-}
-
 module.exports = { buildLedger, buildStandings, rankGuesses };

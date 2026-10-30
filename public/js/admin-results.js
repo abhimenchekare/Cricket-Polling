@@ -70,8 +70,8 @@
         <table class="table">
           <thead>
             <tr>
-              <th>#</th><th>Participant</th><th>1st</th><th>2nd</th><th>3rd</th>
-              <th>Points</th><th>Exact</th><th>Avg miss</th>
+              <th>#</th><th>Participant</th><th>Accurate guesses</th><th>of rounds</th>
+              <th>Top-3</th><th>2nd</th><th>3rd</th><th>Exact</th><th>Avg miss</th>
             </tr>
           </thead>
           <tbody>
@@ -82,10 +82,11 @@
               <tr>
                 <td>${s.rank <= 3 ? `<strong style="color:var(--gold-300,#ffd166)">#${s.rank}</strong>` : s.rank}</td>
                 <td><strong>${escapeHtml(s.name)}</strong></td>
-                <td>${s.firsts || '·'}</td>
+                <td><strong style="color:var(--gold-300,#ffd166);font-size:15px">${s.nearest}</strong></td>
+                <td class="mute-sm">${s.rounds}</td>
+                <td>${s.top3 || '·'}</td>
                 <td>${s.seconds || '·'}</td>
                 <td>${s.thirds || '·'}</td>
-                <td><strong>${s.points}</strong></td>
                 <td>${s.exact || '·'}</td>
                 <td class="mute-sm">${escapeHtml(s.avgDiffLabel || '—')}</td>
               </tr>`
