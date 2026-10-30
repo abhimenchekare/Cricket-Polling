@@ -12,7 +12,7 @@ A complete live polling website for your office cricket auction, built to run **
 
 ---
 
-## What this app does (v3.8.0 — auction list + SHOUT)
+## What this app does (v3.9.1 — auction list + SHOUT)
 
 An office-cricket-auction companion for the audience's phones.
 
@@ -224,7 +224,7 @@ player is shouted. There is a `Stay here` button if someone wants to read it fir
 
 Countdowns under a minute show as plain seconds (`15s`, `8s`); longer ones stay `mm:ss`.
 
-## 4b-bis. ⚡ The Lock-in button answers in ~100 ms (v3.8.0)
+## 4b-bis. ⚡ The Lock-in button answers in ~100 ms (v3.9.1)
 
 The complaint: *"when they select bid submit, it takes 3-4 seconds."* Three separate delays were
 stacked on top of each other, and none of them were the database.
@@ -280,6 +280,32 @@ players accurately.
 `npm run test:display` covers all of it (20 checks: the reveal plays first, winners stay hidden
 during it, places match the API, nothing from the live round leaks, the layout fits, and a new sold
 price replays the reveal and moves the counter).
+
+## 4b-quinquies. 🦆 The audience phone shows the live bid — nothing else
+
+The phone is a single-purpose screen: **the round that is live right now**.
+
+| Shown while a round is live | Not shown, ever |
+| --- | --- |
+| Greeting card (name + employee ID) | "Top 3 closest guesses" lists |
+| Participant + guess counters | "How the room guessed" charts |
+| Player name, countdown, slider, Lock in | Previous-poll archive |
+| One line of result after you lock in |  |
+
+The greeting card and counter strip are **kept** (slimmed, not removed, while a round is live), so the
+phone still feels personal without turning back into a results page.
+
+When no round is live the phone shows the **waiting screen**: a duck in a cricket cap holding a bat.
+It bobs, blinks, chatters its beak, taps its feet and taps the bat on the ground — then sneaks in a
+full practice swing every six seconds — with three dots bubbling above it. When a round has just
+finished it prints **one** quiet line (`Ajit Sarpane sold for 18.0 Cr · you were #2 of 3`) and then
+goes back to waiting.
+
+The duck pauses on `prefers-reduced-motion`.
+
+`npm run test:phone-fit` covers it (25 checks): the greeting card and counters are present, the duck
+exists, holds a bat, the bat is animated, no archive or results cards are in the DOM, and both the
+guess screen and the waiting screen fit one screen without scrolling.
 
 ## 4b-quater. 📱 The guess screen is one screen — no scrolling
 
@@ -761,7 +787,7 @@ npm run test:phone-fit             # the phone guess card fits one screen, with 
 npm run test:display               # the projector podium: 1st/2nd/3rd on the big screen
 ```
 
-**Current results (local, v3.8.0), all with zero failures:**
+**Current results (local, v3.9.1), all with zero failures:**
 
 | Suite | Checks | What it proves |
 | --- | --- | --- |
@@ -769,11 +795,11 @@ npm run test:display               # the projector podium: 1st/2nd/3rd on the bi
 | `bid` | 49 | ladder steps, lakh storage, ranking, three winners |
 | **`shout`** | **34** | paste → order → SHOUT → splash on the phone → sold price → SOLD → next SHOUT, plus undo/skip/guards |
 | `ui` | 32 | join, dashboard, projector, mobile layouts, auto-return from the confirmation |
-| `ui-bid` | 28 | the full slider round on an iPhone 13, incl. the bounce back to the poll |
+| `ui-bid` | 29 | the full slider round on an iPhone 13, incl. the bounce back to the poll |
 | **`vote-speed`** | **7** | Lock-in latency, measured warm **and** with every API call delayed 800 ms |
 | **`ledger`** | **32** | 3 rounds end to end: prices stored, 1st/2nd/3rd correct, late settlement, leaderboard, CSV |
 | **`ranking`** | **16** | the scoring rule itself, incl. 65-vs-60 accurate guesses over 70 players (no DB, no browser) |
-| **`phone-fit`** | **13** | one-screen guess card: no scroll, slider + button visible, no next-player hint, long names |
+| **`phone-fit`** | **25** | one-screen guess card, greeting + counters kept, no next-player hint, duck waiting screen |
 | **`display`** | **20** | big screen: bat-and-ball reveal, then 1st/2nd/3rd place, no player name, fits 1920×1080 |
 | `ui-rapid` | 18 | 10s…2 min presets, remembered across reloads, used by the next SHOUT |
 | `ui-session` | 30 | admin sign-in/session/logout |
@@ -859,4 +885,4 @@ role and base price, and the price you type when the hammer falls. That is all i
 
 ---
 
-*Cricket Auction Live Polling — v3.8.0 · Express + Postgres on Vercel · separate from the auction website.*
+*Cricket Auction Live Polling — v3.9.1 · Express + Postgres on Vercel · separate from the auction website.*

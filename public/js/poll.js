@@ -12,15 +12,13 @@
 
   const els = {
     pollArea: document.getElementById('poll-area'),
-    resultsArea: document.getElementById('results-area'),
-    historyArea: document.getElementById('history-area'),
+    statsBar: document.getElementById('stats-bar'),
     greetName: document.getElementById('greet-name'),
     greetSub: document.getElementById('greet-sub'),
     avatar: document.getElementById('avatar'),
     conn: document.getElementById('conn'),
     eventName: document.querySelectorAll('[data-event-name]'),
-    eventTagline: document.querySelectorAll('[data-event-tagline]'),
-    statsBar: document.getElementById('stats-bar')
+    eventTagline: document.querySelectorAll('[data-event-tagline]')
   };
 
   function serverNow() {
@@ -122,8 +120,6 @@
 
     const closedNow = prev?.poll && payload.poll && prev.poll.id === payload.poll.id && prev.poll.status === 'active' && payload.poll.status === 'closed';
     renderPoll();
-    renderResults();
-    renderHistory();
     renderStats();
     tickTimer();
     if (closedNow) {
@@ -175,25 +171,101 @@
         'guess',
         'guesses'
       )}</span>
-      ${p ? '' : '<span class="pill pill-draft">Waiting for the next shout</span>'}
     `;
   }
 
   function renderPoll() {
     const p = state.poll;
-    if (!p) {
+
+    /* No round on the block → the waiting mascot. Closed rounds use the same screen,
+       with a one-line result of the round that just finished (never a history list). */
+    if (!p || p.status === 'closed' || p.status === 'draft') {
       document.body.classList.remove('guess-focus');
-      els.pollArea.innerHTML = `
-        <div class="card card-hero waiting">
-          <div class="waiting-icon">⏳</div>
-          <h2 style="font-size:20px">Waiting for the host</h2>
-          <p class="muted" style="margin-top:8px">No poll is live right now. Keep this page open — the next poll will appear automatically.</p>
-          <div class="wave"><i></i><i></i><i></i></div>
-        </div>`;
+      els.pollArea.innerHTML = waitingScreen(p);
       return;
     }
 
     renderBidPoll(p);
+  }
+
+  /* 🦆 The waiting screen: a duck in a cap, holding a bat, tapping it on the ground
+     (and sneaking in a full swing every few seconds) until the host shouts. */
+  function waitingScreen(p) {
+    const finished = p && p.status === 'closed' ? p : null;
+    const result = finished ? finishedResultLine(finished) : '';
+    return `
+      <div class="card card-hero duck-card fade-up">
+        <div class="duck-scene">
+          <div class="duck-glow"></div>
+          <svg class="duck" viewBox="0 0 240 220" role="img" aria-label="A duck holding a cricket bat, waiting for the next player">
+            <!-- shadow -->
+            <ellipse class="duck-shadow" cx="120" cy="196" rx="62" ry="9" />
+
+            <!-- body -->
+            <g class="duck-body">
+              <ellipse cx="120" cy="150" rx="58" ry="44" fill="#f6c453" />
+              <ellipse cx="120" cy="158" rx="44" ry="30" fill="#ffd97a" opacity=".55" />
+              <!-- wing -->
+              <path class="duck-wing" d="M96 138 q-22 6 -20 24 q16 10 34 2 q10 -14 -14 -26 z" fill="#e0a63a" />
+              <!-- tail -->
+              <path class="duck-tail" d="M176 146 q22 -4 26 -16 q-16 -2 -22 6 z" fill="#e0a63a" />
+            </g>
+
+            <!-- head -->
+            <g class="duck-head">
+              <ellipse cx="108" cy="86" rx="38" ry="34" fill="#f6c453" />
+              <!-- cap -->
+              <path d="M72 74 q4 -34 38 -34 q34 0 38 32 z" fill="#34d399" />
+              <path d="M72 74 q40 -10 78 0 q4 6 -2 8 q-38 -8 -74 0 q-4 -3 -2 -8 z" fill="#22a06b" />
+              <circle cx="110" cy="42" r="5" fill="#ffd166" />
+              <!-- eye -->
+              <g class="duck-eye">
+                <circle cx="92" cy="88" r="4.6" fill="#1b2436" />
+                <circle cx="90.4" cy="86.4" r="1.5" fill="#fff" opacity=".9" />
+              </g>
+              <!-- beak -->
+              <path class="duck-beak" d="M66 96 q-16 2 -16 9 q0 8 16 8 l14 -2 q6 -6 0 -13 z" fill="#ff9f43" />
+              <path d="M51 103 q14 3 28 1" stroke="#d97e22" stroke-width="1.6" fill="none" opacity=".7" />
+            </g>
+
+            <!-- bat + feet are drawn behind/in front by the wrapping group -->
+            <g class="duck-bat" transform="translate(186 132) rotate(-13)">
+              <rect x="-7" y="-64" width="14" height="40" rx="6" fill="#241a10" />
+              <rect x="-8" y="-30" width="16" height="8" rx="3" fill="#b8794a" />
+              <path d="M-11 -24 L11 -24 L11 26 Q11 38 0 38 Q-11 38 -11 26 Z" fill="#e7c088" />
+              <path d="M-11 20 L11 20 L11 26 Q11 38 0 38 Q-11 38 -11 26 Z" fill="#cfa568" />
+            </g>
+
+            <g class="duck-feet">
+              <path d="M104 194 q-2 8 -12 8 q10 6 20 0 q4 -5 -8 -8 z" fill="#ff9f43" />
+              <path d="M138 194 q-2 8 -12 8 q10 6 20 0 q4 -5 -8 -8 z" fill="#ff9f43" />
+            </g>
+          </svg>
+
+          <div class="duck-dots" aria-hidden="true"><i></i><i></i><i></i></div>
+        </div>
+
+        ${result}
+
+        <h2 class="duck-title">${finished ? 'That player is done' : 'Waiting for the next player'}</h2>
+        <p class="muted duck-sub">${
+          finished
+            ? 'Sit tight — the host is lining up the next name. This screen fills in by itself.'
+            : 'The bat is ready. Keep this page open — the next name appears here automatically.'
+        }</p>
+      </div>`;
+  }
+
+  /* One quiet line about the round that just ended — no lists, no charts, no archive. */
+  function finishedResultLine(p) {
+    const r = p.resultsVisible ? p.results : null;
+    if (!r || r.kind !== 'bid') return '';
+    const sold = r.actualLabel
+      ? `<strong>${escapeHtml(p.playerName || 'Player')}</strong> sold for <em>${escapeHtml(r.actualLabel)}</em>`
+      : '';
+    const rank = r.viewer && r.viewer.rank ? `you were <strong>#${r.viewer.rank}</strong> of ${r.totalGuesses}` : '';
+    const line = [sold, rank].filter(Boolean).join(' · ');
+    return line ? `<div class="duck-result">${line}</div>` : '';
   }
 
   function bidLadder() {
@@ -462,148 +534,6 @@
     ringEl.style.setProperty('--pct', pct.toFixed(1));
     timerEl.classList.toggle('is-urgent', remaining <= 10_000);
   }
-
-  function renderResults() {
-    if (!state || !state.poll) {
-      els.resultsArea.innerHTML = '';
-      return;
-    }
-    const p = state.poll;
-    if (!p.resultsVisible || !p.results) {
-      els.resultsArea.innerHTML = `
-        <div class="card">
-          <div class="card-head">
-            <div>
-              <div class="eyebrow">Results</div>
-              <div class="card-title" style="margin-top:4px">Hidden for now</div>
-            </div>
-            <span class="pill pill-ghost">🔒</span>
-          </div>
-          <div class="locked">
-            <span style="font-size:18px">👀</span>
-            <div><strong>The host controls result visibility.</strong><br />
-            ${
-              p.showResults === 'never'
-                ? 'Results for this poll will not be published to the audience.'
-                : 'They will appear here automatically once revealed — no need to refresh.'
-            }</div>
-          </div>
-        </div>`;
-      return;
-    }
-
-    renderBidResults(p);
-  }
-
-  /* Winners + my own rank for the round just played. */
-  function renderBidResults(p) {
-    const r = p.results || {};
-    const mine = r.viewer;
-    const soldLabel = r.actualLabel || '—';
-
-    const mineBlock = mine
-      ? `<div class="bid-winner ${mine.isWinner ? 'rank-' + mine.rank : ''}" style="margin-bottom:12px">
-           <span class="bid-medal">${mine.isWinner ? ['🥇', '🥈', '🥉'][mine.rank - 1] : '🎯'}</span>
-           <div class="grow">
-             <div class="bid-winner-name">Your guess: ${escapeHtml(mine.guessLabel)}</div>
-             <div class="mute-sm">${
-               mine.direction === 'exact'
-                 ? 'Exact price — perfect call!'
-                 : `${escapeHtml(mine.diffLabel)} ${escapeHtml(mine.direction)}`
-             } · rank #${mine.rank} of ${r.totalGuesses}</div>
-           </div>
-         </div>`
-      : '';
-
-    const dist = (r.distribution || []).length
-      ? `<div class="bid-dist" style="margin-top:6px">
-           ${r.distribution
-             .map(
-               (d) => `<div class="bid-dist-row ${d.isActual ? 'is-actual' : ''}">
-                 <span class="bid-dist-label">${escapeHtml(d.label)}</span>
-                 <div class="bar-track"><div class="bar-fill" data-w="${Math.max(6, d.percent)}"></div></div>
-                 <span class="bid-dist-count">${d.count}</span>
-               </div>`
-             )
-             .join('')}
-         </div>`
-      : '';
-
-    els.resultsArea.innerHTML = `
-      <div class="card fade-up">
-        <div class="card-head">
-          <div>
-            <div class="eyebrow">Final result</div>
-            <div class="card-title" style="margin-top:4px">Sold for ${escapeHtml(soldLabel)}</div>
-          </div>
-          <span class="pill pill-gold">🎯 ${r.totalGuesses || 0} ${window.App.plural(
-            r.totalGuesses || 0,
-            'guess',
-            'guesses'
-          )}</span>
-        </div>
-        ${mineBlock}
-        <div class="eyebrow" style="margin:10px 0 8px">Top 3 closest guesses</div>
-        <div class="bid-winners">${window.App.bidResultRows(r)}</div>
-        <div class="eyebrow" style="margin:18px 0 8px">How the room guessed</div>
-        ${dist}
-      </div>`;
-
-    animateBars(els.resultsArea);
-  }
-
-  function renderHistory() {
-    const history = (state && state.history) || [];
-    if (!history.length) {
-      els.historyArea.innerHTML = '';
-      return;
-    }
-    els.historyArea.innerHTML = `
-      <div class="card">
-        <div class="card-head" style="margin-bottom:10px">
-          <div>
-            <div class="eyebrow">Previous polls</div>
-            <div class="card-title" style="margin-top:4px">Results archive</div>
-          </div>
-        </div>
-        ${history.slice(0, 8).map((h) => `
-          <div class="accordion" data-history="${h.id}">
-            <button class="accordion-head" type="button">
-              <span class="accordion-q">${escapeHtml(h.question)}</span>
-              <span class="pill pill-ghost">${h.totalVotes} 🎯</span>
-              <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
-            </button>
-            <div class="accordion-body">
-              <div class="results">${window.App.bidResultRows(h.results)}</div>
-              <p class="mute-sm" style="margin-top:8px">${h.totalVotes} ${window.App.plural(
-                h.totalVotes,
-                'guess',
-                'guesses'
-              )} · closed ${window.App.timeAgo(h.closedAt)}</p>
-            </div>
-          </div>`).join('')}
-      </div>`;
-
-    els.historyArea.querySelectorAll('.accordion-head').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        btn.closest('.accordion').classList.toggle('open');
-        animateBars(btn.closest('.accordion'));
-      });
-    });
-  }
-
-  function animateBars(scope) {
-    const root = scope || document;
-    requestAnimationFrame(() => {
-      root.querySelectorAll('.bar-fill').forEach((bar) => {
-        bar.style.width = `${bar.dataset.w}%`;
-      });
-    });
-  }
-
-  // Re-draw bars after every render
-  const observer = new MutationObserver(() => animateBars(document));
-  observer.observe(document.body, { childList: true, subtree: true });
 
   document.getElementById('logout-btn')?.addEventListener('click', async () => {
     const ok = await window.App.confirmDialog({

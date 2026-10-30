@@ -85,6 +85,17 @@ const LONG_NAME = `Suryakumar Yadav Longname ${STAMP}`;
     await p.waitForSelector('#bid-range', { timeout: 15000 });
     await p.waitForTimeout(2600); // let the shout splash finish
 
+    const chrome = await p.evaluate(() => ({
+      greet: (document.querySelector('#greet-name') || {}).textContent || '',
+      stats: (document.querySelector('#stats-bar') || {}).innerText || '',
+      greetVisible: (() => {
+        const el = document.querySelector('.greet');
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        return r.height > 10 && getComputedStyle(el).display !== 'none';
+      })()
+    }));
+
     const m = await p.evaluate(() => {
       const box = (sel) => {
         const el = document.querySelector(sel);
@@ -110,17 +121,20 @@ const LONG_NAME = `Suryakumar Yadav Longname ${STAMP}`;
 
     await p.screenshot({ path: `test/screenshots/fit-${label}.png` });
     await ctx.close();
-    return m;
+    return { ...m, chrome };
   };
 
   /* ------------------------------- iPhone 13 ------------------------------- */
   console.log('\n1️⃣  iPhone 13 (390×664 visible)');
   const ip = await measure('iphone', devices['iPhone 13'], `FIT-A-${STAMP}`);
 
+  ok('the greeting card stays on the live screen', ip.chrome.greetVisible && ip.chrome.greet.startsWith('Hi,'), ip.chrome.greet.trim());
+  ok('the participant/guess counters stay', /participants/i.test(ip.chrome.stats) && /guess/i.test(ip.chrome.stats), ip.chrome.stats.replace(/\n/g, ' '));
   ok('the slider is visible without scrolling', ip.range.top >= 0 && ip.range.bottom <= ip.vh, `top ${ip.range.top} / ${ip.vh}`);
   ok('the Lock in button is above the fold', ip.button.bottom <= ip.vh, `bottom ${ip.button.bottom} / ${ip.vh}`);
   ok('the page does not scroll at all', ip.scrollH <= ip.vh + 2, `content ${ip.scrollH}px vs screen ${ip.vh}px`);
   ok('the chip shortcuts fit in the same screen', ip.chips.bottom <= ip.vh);
+
 
   console.log('\n2️⃣  Nothing about the next player');
   ok('no "next:" hint on the phone', !/next:/i.test(ip.text));
@@ -143,8 +157,44 @@ const LONG_NAME = `Suryakumar Yadav Longname ${STAMP}`;
   ok('still one screen', small.scrollH <= small.vh + 2, `content ${small.scrollH}px vs screen ${small.vh}px`);
   ok('slider and button still visible', small.range.bottom <= small.vh && small.button.bottom <= small.vh);
 
+  /* --------------------- waiting screen: duck, nothing else ---------------- */
+  console.log('\n5️⃣  Waiting screen — a duck with a bat, nothing else');
+  await closeLive();
+  const waitCtx = await browser.newContext({ ...devices['iPhone 13'] });
+  const wait = await waitCtx.newPage();
+  wait.on('pageerror', (e) => errors.push(`[waiting] ${e.message}`));
+  await wait.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await wait.fill('#name', `Duck ${STAMP}`);
+  await wait.fill('#employeeId', `DUCK-${STAMP}`);
+  await wait.click('#join-submit');
+  await wait.waitForTimeout(700);
+  await wait.goto(`${BASE}/poll`, { waitUntil: 'domcontentloaded' });
+  await wait.waitForSelector('.duck', { timeout: 12000 });
+  await wait.waitForTimeout(600);
+  const waitText = await wait.locator('#poll-area').innerText();
+  ok('the duck mascot is on screen', (await wait.locator('.duck').count()) === 1);
+  ok('it holds a bat', (await wait.locator('.duck-bat').count()) === 1);
+  ok('the bat is animated', /duckBat/.test(await wait.locator('.duck-bat').evaluate((el) => getComputedStyle(el).animationName)));
+  ok(
+    'it says what is happening',
+    /waiting for the next player|that player is done/i.test(waitText),
+    waitText.split('\n')[0]
+  );
+  ok('no previous-poll archive', !/previous polls|results archive/i.test(await wait.locator('body').innerText()));
+  ok('no results or archive cards on the phone', (await wait.locator('#results-area, #history-area').count()) === 0);
+  ok('the greeting card is still there', (await wait.locator('.greet #greet-name').count()) === 1);
+  ok('the participant counter is still there', /participants/i.test(await wait.locator('#stats-bar').innerText()));
+  ok('the waiting screen fits one screen', (await wait.evaluate(() => document.documentElement.scrollHeight)) <= (await wait.evaluate(() => window.innerHeight)) + 2);
+  await wait.screenshot({ path: 'test/screenshots/fit-duck.png' });
+
   /* ------------------------------ still usable ------------------------------ */
-  console.log('\n5️⃣  It still submits');
+  console.log('\n6️⃣  It still submits');
+  await api('/api/admin/players', {
+    method: 'POST',
+    body: JSON.stringify({ names: `Fit Submit Player ${STAMP}, Batter, 1 Cr` })
+  }).catch(() => {});
+  const reshout = await api('/api/admin/shout', { method: 'POST', body: JSON.stringify({ timerSeconds: 300 }) });
+  ok('a fresh round is open for the submit check', reshout.status === 201, JSON.stringify(reshout.data && reshout.data.error));
   const ctx = await browser.newContext({ ...devices['iPhone 13'] });
   const p = await ctx.newPage();
   p.on('pageerror', (e) => errors.push(`[submit] ${e.message}`));

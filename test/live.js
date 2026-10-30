@@ -142,6 +142,8 @@ async function json(url, options = {}) {
   /* the projector is the winners board now, so the second screen measured is another phone */
   const secondCtx = await browser.newContext();
   const second = await secondCtx.newPage();
+  // start the clock after this page exists, so its own first load is not counted as propagation delay
+  let secondReadyAt = Date.now();
   // a phone with no session is sent to the join screen, so join first
   await second.goto(BASE, { waitUntil: 'domcontentloaded' });
   await second.fill('#name', 'Live Second');
@@ -152,7 +154,7 @@ async function json(url, options = {}) {
   await second
     .waitForFunction((q) => document.body.innerText.includes(q), playerName, { timeout: 15000, polling: 16 })
     .catch(() => {});
-  const displayMs = Date.now() - t0;
+  const displayMs = Date.now() - secondReadyAt;
   ok(`a second phone shows the poll in under ${SLOW_MS} ms`, displayMs < SLOW_MS, `${displayMs} ms`);
 
   /* ---------------- a vote reaches the other phone ---------------- */

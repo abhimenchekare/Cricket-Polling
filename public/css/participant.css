@@ -735,16 +735,41 @@ body.guess-focus .topbar .brand-sub {
   display: none;
 }
 
-/* the greeting card and the page footer are pure noise mid-round */
-body.guess-focus .greet,
+/* the footer line folds away mid-round; the greeting card stays, just slimmer */
 body.guess-focus .page > p.mute-sm,
 body.guess-focus .wrap > p.mute-sm,
 body.guess-focus main > p.mute-sm {
   display: none;
 }
 
+body.guess-focus .greet {
+  gap: 9px;
+  padding: 9px 12px;
+}
+
+body.guess-focus .greet .avatar {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 11px;
+  font-size: 14px;
+}
+
+body.guess-focus .greet-name {
+  font-size: 14px;
+}
+
+body.guess-focus .greet-sub {
+  font-size: 11.5px;
+}
+
+body.guess-focus .greet .btn-sm {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
 body.guess-focus #stats-bar {
-  margin-top: 8px !important;
+  margin-top: 7px !important;
   gap: 6px !important;
 }
 
@@ -764,8 +789,17 @@ body.guess-focus #history-area {
 }
 
 body.guess-focus .poll-card {
-  padding: 14px 14px 12px;
-  margin-top: 8px;
+  padding: 11px 13px 9px;
+  margin-top: 6px;
+}
+
+/* pull the whole live card up a touch — the greeting and counter strip are staying */
+body.guess-focus main.wrap {
+  padding-top: 0;
+}
+
+body.guess-focus .greet {
+  margin-top: 8px !important;
 }
 
 body.guess-focus .poll-meta {
@@ -850,13 +884,18 @@ body.guess-focus .poll-meta .pill {
 }
 
 body.guess-focus .bid-value {
-  font-size: clamp(30px, 9vw, 40px);
-  line-height: 1.05;
-  margin: 2px 0 6px;
+  font-size: clamp(27px, 8vw, 36px);
+  line-height: 1;
+  margin: 0 0 2px;
 }
 
 body.guess-focus .bid-track-row {
-  margin-top: 2px;
+  margin-top: 0;
+}
+
+body.guess-focus .bid-scale {
+  margin-top: 0;
+  font-size: 10.5px;
 }
 
 body.guess-focus .bid-range {
@@ -866,6 +905,7 @@ body.guess-focus .bid-range {
 /* chips: one swipeable row instead of three stacked rows */
 body.guess-focus .bid-chips {
   flex-wrap: nowrap;
+  padding-top: 4px;
   mask-image: linear-gradient(to right, #000 88%, transparent 100%);
   -webkit-mask-image: linear-gradient(to right, #000 88%, transparent 100%);
   overflow-x: auto;
@@ -883,8 +923,8 @@ body.guess-focus .bid-chips::-webkit-scrollbar {
 
 body.guess-focus .bid-chip {
   flex: 0 0 auto;
-  padding: 7px 11px;
-  font-size: 12.5px;
+  padding: 6px 10px;
+  font-size: 12px;
 }
 
 body.guess-focus .bid-slider-wrap {
@@ -893,8 +933,8 @@ body.guess-focus .bid-slider-wrap {
 
 body.guess-focus .sticky-action {
   position: static;
-  padding: 10px 0 0;
-  margin-top: 4px;
+  padding: 6px 0 0;
+  margin-top: 0;
   background: none;
   backdrop-filter: none;
 }
@@ -906,6 +946,234 @@ body.guess-focus .sticky-action .btn-lg {
 }
 
 body.guess-focus .bid-fineprint {
-  margin-top: 6px !important;
-  font-size: 11px;
+  margin-top: 4px !important;
+  font-size: 10.5px;
+}
+
+body.guess-focus .bid-guesscount {
+  display: none;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   🦆 The waiting screen — a duck in a cricket cap, bat in hand, tapping away
+   until the host shouts the next player.
+   ───────────────────────────────────────────────────────────────────────────── */
+.duck-card {
+  text-align: center;
+  padding: 14px 16px 16px;
+  overflow: hidden;
+}
+
+.duck-scene {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 196px;
+}
+
+.duck-glow {
+  position: absolute;
+  width: 220px;
+  height: 220px;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(52, 211, 153, 0.22), rgba(255, 209, 102, 0.12) 45%, transparent 70%);
+  filter: blur(2px);
+  animation: duckGlow 3.6s ease-in-out infinite;
+}
+
+@keyframes duckGlow {
+  0%, 100% { transform: scale(1); opacity: 0.75; }
+  50% { transform: scale(1.12); opacity: 1; }
+}
+
+.duck {
+  width: 178px;
+  height: auto;
+  position: relative;
+  z-index: 1;
+  overflow: visible;
+}
+
+.duck-shadow {
+  fill: rgba(2, 6, 18, 0.55);
+  animation: duckShadow 3.2s ease-in-out infinite;
+}
+
+@keyframes duckShadow {
+  0%, 100% { transform: scaleX(1); opacity: 0.55; }
+  50% { transform: scaleX(0.92); opacity: 0.4; }
+}
+
+/* the whole duck breathes */
+.duck-body {
+  transform-origin: 120px 190px;
+  animation: duckBob 3.2s ease-in-out infinite;
+}
+
+@keyframes duckBob {
+  0%, 100% { transform: translateY(0) scaleY(1); }
+  50% { transform: translateY(-3px) scaleY(1.015); }
+}
+
+.duck-head {
+  transform-origin: 108px 120px;
+  animation: duckHead 3.2s ease-in-out infinite;
+}
+
+@keyframes duckHead {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-4deg); }
+  70% { transform: rotate(3deg); }
+}
+
+/* blink every few seconds */
+.duck-eye {
+  transform-origin: 92px 88px;
+  animation: duckBlink 4.4s infinite;
+}
+
+@keyframes duckBlink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  95% { transform: scaleY(0.12); }
+}
+
+/* the beak chats to itself */
+.duck-beak {
+  transform-origin: 80px 100px;
+  animation: duckBeak 3.2s ease-in-out infinite;
+}
+
+@keyframes duckBeak {
+  0%, 100% { transform: rotate(0deg); }
+  46% { transform: rotate(4deg); }
+  54% { transform: rotate(-2deg); }
+}
+
+/* wings flap when it gets impatient */
+.duck-wing {
+  transform-origin: 98px 146px;
+  animation: duckWing 6.4s ease-in-out infinite;
+}
+
+@keyframes duckWing {
+  0%, 72%, 100% { transform: rotate(0deg); }
+  78% { transform: rotate(-16deg); }
+  84% { transform: rotate(4deg); }
+  90% { transform: rotate(-10deg); }
+}
+
+.duck-tail {
+  transform-origin: 176px 146px;
+  animation: duckTail 2.4s ease-in-out infinite;
+}
+
+@keyframes duckTail {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-6deg); }
+}
+
+/* feet tap impatiently */
+.duck-feet {
+  transform-origin: 120px 190px;
+  animation: duckFeet 1.6s ease-in-out infinite;
+}
+
+@keyframes duckFeet {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(-2px); }
+}
+
+/* the bat: taps the ground, then sneaks in a full practice swing */
+.duck-bat {
+  transform-origin: 186px 132px;
+  animation: duckBat 6.4s cubic-bezier(0.4, 0, 0.3, 1) infinite;
+}
+
+@keyframes duckBat {
+  0%, 6% { transform: translate(186px, 132px) rotate(-13deg); }
+  12% { transform: translate(186px, 132px) rotate(-22deg); }
+  18% { transform: translate(186px, 132px) rotate(-9deg); }
+  24% { transform: translate(186px, 132px) rotate(-22deg); }
+  30% { transform: translate(186px, 132px) rotate(-9deg); }
+  36%, 62% { transform: translate(186px, 132px) rotate(-13deg); }
+  /* big practice swing */
+  68% { transform: translate(186px, 132px) rotate(-58deg); }
+  76% { transform: translate(186px, 132px) rotate(24deg); }
+  84% { transform: translate(186px, 132px) rotate(-4deg); }
+  92%, 100% { transform: translate(186px, 132px) rotate(-13deg); }
+}
+
+/* the "…" bubbles */
+.duck-dots {
+  position: absolute;
+  top: 6px;
+  right: 22%;
+  display: flex;
+  gap: 5px;
+  z-index: 2;
+}
+
+.duck-dots i {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--gold-300, #ffd166);
+  opacity: 0.35;
+  animation: duckDots 1.5s ease-in-out infinite;
+}
+
+.duck-dots i:nth-child(2) { animation-delay: 0.2s; }
+.duck-dots i:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes duckDots {
+  0%, 100% { opacity: 0.25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-5px); }
+}
+
+.duck-title {
+  font-size: clamp(18px, 5vw, 22px);
+  margin: 6px 0 0;
+}
+
+.duck-sub {
+  font-size: 13px;
+  margin: 6px auto 0;
+  max-width: 32ch;
+}
+
+.duck-result {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px 8px;
+  margin: 4px auto 10px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 209, 102, 0.35);
+  background: rgba(255, 209, 102, 0.1);
+  font-size: 13px;
+  color: var(--text, #fff);
+}
+
+.duck-result em {
+  font-style: normal;
+  font-weight: 800;
+  color: var(--gold-300, #ffd166);
+}
+
+.duck-result strong {
+  color: var(--text, #fff);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .duck-bat,
+  .duck-wing,
+  .duck-feet,
+  .duck-tail,
+  .duck-glow,
+  .duck-body,
+  .duck-head {
+    animation: none !important;
+  }
 }
