@@ -1018,11 +1018,15 @@ router.post('/shout', async (req, res, next) => {
       Number(req.body?.timerSeconds) > 0 ? Math.min(Number(req.body.timerSeconds), 3600) : SHOUT_DEFAULT_SECONDS;
     const now = Date.now();
 
+    /* Inserted live in one go — the audience only ever needs the active row, so there is no
+       draft-then-update round trip. Every query saved here is ~40 ms off the SHOUT button. */
+    const startedAt = Date.now();
+    const endsAt = timerSeconds > 0 ? startedAt + timerSeconds * 1000 : null;
     const poll = await one(
       `INSERT INTO polls (question, description, category, status, show_results, anonymous,
                           timer_seconds, remaining_ms, poll_type, player_name, player_id,
-                          created_at, updated_at, created_by)
-       VALUES ($1, $2, 'Bid range', 'draft', 'after', 0, $3, $4, 'bid', $5, $6, $7, $7, $8)
+                          created_at, updated_at, created_by, started_at, ends_at, revision)
+       VALUES ($1, $2, 'Bid range', 'active', 'after', 0, $3, $4, 'bid', $5, $6, $7, $7, $8, $9, $10, 1)
        RETURNING *`,
       [
         auction.questionFor(player.name),
@@ -1032,32 +1036,24 @@ router.post('/shout', async (req, res, next) => {
         player.name,
         player.id,
         now,
-        req.admin.username
+        req.admin.username,
+        startedAt,
+        endsAt
       ]
     );
 
     /* Exactly one player is ever on the block: anyone left behind (their round was closed
        without a price) is marked skipped, so the dashboard can never point at the wrong name. */
+    /* One statement for the whole roster move: whoever was left on the block becomes skipped and
+       this player goes on it. Two round trips became one. */
     await q(
       `UPDATE auction_players
-          SET status = 'skipped'
-        WHERE status = 'on_block' AND id <> $1 AND sold_lakh IS NULL`,
-      [player.id]
-    );
-
-    await q(
-      "UPDATE auction_players SET status = 'on_block', poll_id = $1, shouted_at = $2 WHERE id = $3",
-      [poll.id, now, player.id]
-    );
-
-    // start it immediately — this is what the audience sees
-    const startedAt = Date.now();
-    const endsAt = timerSeconds > 0 ? startedAt + timerSeconds * 1000 : null;
-    await q(
-      `UPDATE polls SET status = 'active', started_at = $1, ends_at = $2, remaining_ms = $3,
-                        revision = revision + 1, updated_at = $1
-        WHERE id = $4`,
-      [startedAt, endsAt, timerSeconds * 1000, poll.id]
+          SET status = CASE WHEN id = $1 THEN 'on_block' ELSE 'skipped' END,
+              poll_id = CASE WHEN id = $1 THEN $2::int ELSE poll_id END,
+              shouted_at = CASE WHEN id = $1 THEN $3::bigint ELSE shouted_at END
+        WHERE (status = 'on_block' AND id <> $1 AND sold_lakh IS NULL)
+           OR id = $1`,
+      [player.id, poll.id, now]
     );
 
     // any other live round is paused so exactly one round is on screen
@@ -1066,15 +1062,18 @@ router.post('/shout', async (req, res, next) => {
       [startedAt, poll.id]
     );
 
-    await logActivity('auction.shout', `📣 ${player.name} is on the block`, req.admin.username);
+    /* Answer the button first, then tidy up. The admin panel paints the new player from this
+       response; the audit log and the counters arrive with the next state push. */
+    const countsQ = auction.counts().catch(() => null);
+    const upNextQ = auction.queue(3).catch(() => []);
+    logActivity('auction.shout', `📣 ${player.name} is on the block`, req.admin.username).catch(() => {});
 
-    const remaining = await auction.counts();
     res.status(201).json({
       ok: true,
       shouted: { id: player.id, name: player.name },
       poll: { id: poll.id, question: auction.questionFor(player.name), timerSeconds },
-      counts: remaining,
-      upNext: (await auction.queue(3)).map((r) => ({ id: r.id, name: r.name }))
+      counts: await countsQ,
+      upNext: (await upNextQ).map((r) => ({ id: r.id, name: r.name }))
     });
   } catch (err) {
     next(err);

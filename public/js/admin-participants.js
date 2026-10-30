@@ -50,7 +50,9 @@
         <div class="avatar" style="width:40px;height:40px;font-size:14px;border-radius:12px">${escapeHtml(initials(p.name))}</div>
         <div class="grow">
           <div class="p-name">${escapeHtml(p.name)} ${p.blocked ? '<span class="pill pill-closed" style="margin-left:6px">blocked</span>' : ''}</div>
-          <div class="p-sub">${escapeHtml(p.employeeId)}${p.team ? ' · ' + escapeHtml(p.team) : ''} · ${p.voteCount} vote${p.voteCount === 1 ? '' : 's'} · joined ${timeAgo(p.createdAt)}</div>
+          <div class="p-sub">${
+            String(p.employeeId || '').startsWith('@') ? '' : escapeHtml(p.employeeId) + ' · '
+          }${p.team ? escapeHtml(p.team) + ' · ' : ''}${p.voteCount} vote${p.voteCount === 1 ? '' : 's'} · joined ${timeAgo(p.createdAt)}</div>
         </div>
         <div class="row" style="gap:6px">
           <button class="btn btn-ghost btn-sm" data-act="toggle" title="${p.blocked ? 'Unblock' : 'Block'}">${p.blocked ? '✅' : '🚫'}</button>

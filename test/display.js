@@ -86,7 +86,6 @@ const STAMP = Date.now().toString().slice(-5);
     page.on('pageerror', (e) => errors.push(`[${g.name}] ${e.message}`));
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
     await page.fill('#name', g.name);
-    await page.fill('#employeeId', g.id);
     await page.click('#join-submit');
     await page.waitForTimeout(500);
     await page.close();
@@ -236,15 +235,37 @@ const STAMP = Date.now().toString().slice(-5);
     await page.waitForSelector('text=Guess locked in', { timeout: 15000 });
     await page.close();
   }
+  // only a SOLD PRICE may move the board — the round above is still un-priced
+  const beforeSettles = await dp.locator('.dp-board-sub').innerText();
+  await dp.waitForTimeout(2500);
+  ok(
+    'a shouted player with no price does not disturb the board',
+    (await dp.locator('.dp-board-sub').innerText()) === beforeSettles,
+    beforeSettles.trim()
+  );
+
+  /* this player sells for 2.30 Cr — Bravo guessed exactly that, so the board must change */
   await api(`/api/admin/polls/${shout.data.poll.id}/actual`, { method: 'POST', body: JSON.stringify({ lakh: 230 }) });
 
-  // the new round triggers the reveal again, then the updated board
+  // the new sold price replays the reveal, then the updated board
   await dp.waitForSelector('#dp-swing.is-playing', { timeout: 15000 });
   ok('a new sold price replays the bat-and-ball reveal', true);
-  await dp.waitForSelector('.dp-board .dp-winner', { timeout: 15000 });
-  await dp.waitForTimeout(600);
-  const after = await dp.locator('.dp-board-sub').innerText();
-  ok('the "players sold" counter moves on its own', before !== after, `${before} → ${after}`);
+
+  /* the reveal is 2 s long — give the board its moment, then read it */
+  let subAfter = before;
+  await dp
+    .waitForFunction(
+      (b) => (document.querySelector('.dp-board-sub') || {}).innerText !== b,
+      before,
+      { timeout: 20000, polling: 250 }
+    )
+    .catch(() => {});
+  subAfter = await dp.locator('.dp-board-sub').innerText();
+  ok('the "players sold" counter moves on its own', before !== subAfter, `${before.trim()} → ${subAfter.trim()}`);
+
+  const apiLeader = (await api('/api/admin/ledger')).data.standings[0].name;
+  const shownLeader = (await dp.locator('.dp-winner.rank-1 .dp-winner-name').innerText()).trim();
+  ok('the board agrees with the new standings', shownLeader === apiLeader, `${shownLeader} vs ${apiLeader}`);
 
   await browser.close();
 

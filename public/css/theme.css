@@ -1304,3 +1304,11 @@ textarea {
 }
 
 
+
+/* The shout button while the write is in flight — visible but calm, never a spinner that hides
+   the name the host just pressed. */
+#shout-btn.is-pending {
+  opacity: 0.92;
+  cursor: progress;
+  box-shadow: 0 0 0 2px rgba(255, 209, 102, 0.35) inset;
+}

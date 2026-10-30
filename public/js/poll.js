@@ -84,7 +84,8 @@
         return;
       }
       els.greetName.textContent = `Hi, ${meta.viewer.name}`;
-      els.greetSub.textContent = `Employee ID · ${meta.viewer.employeeId}`;
+      const id = String(meta.viewer.employeeId || '');
+      els.greetSub.textContent = id && !id.startsWith('@') ? `Employee ID · ${id}` : 'One guess per player';
       els.avatar.textContent = initials(meta.viewer.name);
     } catch {
       toast('Cannot reach the server. Check your internet connection and refresh.', 'err', 6000);

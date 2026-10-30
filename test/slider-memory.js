@@ -78,13 +78,12 @@ const STAMP = Date.now().toString().slice(-5);
 
   const browser = await chromium.launch();
 
-  const joinPhone = async (name, employeeId) => {
+  const joinPhone = async (name) => {
     const ctx = await browser.newContext({ viewport: { width: 390, height: 664 } });
     const page = await ctx.newPage();
     page.on('pageerror', (e) => errors.push(`[${name}] ${e.message}`));
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
     await page.fill('#name', name);
-    await page.fill('#employeeId', employeeId);
     await page.click('#join-submit');
     await page.waitForTimeout(500);
     await page.goto(`${BASE}/poll`, { waitUntil: 'domcontentloaded' });
@@ -107,14 +106,14 @@ const STAMP = Date.now().toString().slice(-5);
   /* ---------------------- 1️⃣  the audience phone ---------------------- */
   console.log('\n1️⃣  Another participant votes while you are still guessing');
 
-  const alice = await joinPhone('Slider Alice', `SL-A-${STAMP}`);
+  const alice = await joinPhone(`Slider Alice ${STAMP}`);
   await dial(alice, 24);
   await alice.waitForTimeout(250);
   const aliceBefore = await readIndex(alice);
   const aliceLabel = await alice.textContent('.bid-value');
   ok('Alice is holding a position away from the default', aliceBefore === 24, `index ${aliceBefore} · ${aliceLabel}`);
 
-  const bob = await joinPhone('Slider Bob', `SL-B-${STAMP}`);
+  const bob = await joinPhone(`Slider Bob ${STAMP}`);
   await dial(bob, 8);
   await bob.click('#vote-btn');
   await bob.waitForTimeout(3000);
@@ -133,7 +132,7 @@ const STAMP = Date.now().toString().slice(-5);
 
   /* Two more votes in quick succession — the old bug showed up on the second push. */
   for (const [n, v] of [['Slider Carol', 30], ['Slider Dev', 12]]) {
-    const p = await joinPhone(n, `SL-${n.slice(-1)}-${STAMP}`);
+    const p = await joinPhone(`${n} ${STAMP}`);
     await dial(p, v);
     await p.click('#vote-btn');
     await p.waitForTimeout(1200);
@@ -180,7 +179,7 @@ const STAMP = Date.now().toString().slice(-5);
   const settleBefore = await readIndex(admin, '#ss-range');
   ok('the host can dial the sold price before anyone votes', settleBefore === 26, `index ${settleBefore}`);
 
-  const eve = await joinPhone('Slider Eve', `SL-E-${STAMP}`);
+  const eve = await joinPhone(`Slider Eve ${STAMP}`);
   await dial(eve, 20);
   await eve.click('#vote-btn');
   await eve.waitForTimeout(3000);
@@ -197,7 +196,7 @@ const STAMP = Date.now().toString().slice(-5);
     await dialWhenReady('#adm-bid-range', 31);
     await admin.waitForTimeout(300);
     const liveBefore = await readIndex(admin, '#adm-bid-range');
-    const frank = await joinPhone('Slider Frank', `SL-F-${STAMP}`);
+    const frank = await joinPhone(`Slider Frank ${STAMP}`);
     await dial(frank, 6);
     await frank.click('#vote-btn');
     await frank.waitForTimeout(3000);

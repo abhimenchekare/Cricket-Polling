@@ -5,7 +5,6 @@
 
   const form = document.getElementById('join-form');
   const nameInput = document.getElementById('name');
-  const idInput = document.getElementById('employeeId');
   const codeInput = document.getElementById('code');
   const codeField = document.getElementById('code-field');
   const errorBox = document.getElementById('join-error');
@@ -73,7 +72,6 @@
       returning.classList.remove('hidden');
       document.getElementById('returning-name').textContent = meta.viewer.name;
       nameInput.value = meta.viewer.name;
-      idInput.value = meta.viewer.employeeId;
       submitBtn.textContent = 'Continue to polls';
     }
 
@@ -96,16 +94,15 @@
     e.preventDefault();
     showError('');
     const name = nameInput.value.trim();
-    const employeeId = idInput.value.trim();
     const code = codeInput ? codeInput.value.trim() : '';
 
     if (name.length < 2) return showError('Please enter your full name');
-    if (employeeId.length < 2) return showError('Please enter your employee ID');
+    if (name.length > 40) return showError('That name is a little too long');
     if (meta?.join?.requiresCode && !code) return showError('Please enter the event access code');
 
     setBusy(submitBtn, true, 'Joining…');
     try {
-      const res = await API.post('/api/join', { name, employeeId, code });
+      const res = await API.post('/api/join', { name, code });
       toast(res.returning ? `Welcome back, ${res.participant.name}!` : `You're in, ${res.participant.name}!`, 'ok');
       window.location.href = '/poll';
     } catch (err) {

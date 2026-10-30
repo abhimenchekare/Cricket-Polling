@@ -12,7 +12,7 @@ A complete live polling website for your office cricket auction, built to run **
 
 ---
 
-## What this app does (v4.0.0 — auction list + SHOUT)
+## What this app does (v4.1.0 — auction list + SHOUT)
 
 An office-cricket-auction companion for the audience's phones.
 
@@ -381,6 +381,52 @@ What changed on screen:
 `npm run test:ranking` is the referee for all of it (31 checks): exact wins, nobody exact, five exact
 bids (earliest three take the podium), one right bid beating three near misses, and the tie-breaks.
 `npm run test:bid`, `test:ledger`, `test:e2e` and `test:display` were rewritten to the same rule.
+
+## 4b-nonies. ⚡ v4.1.0 — what made the buttons slow, and what fixed it
+
+Three things were making SHOUT and Lock in take 2–3 seconds on the deployed site. None of them was
+the button itself:
+
+| What was wrong | Why it hurt | Fix |
+| --- | --- | --- |
+| The live stream's "has anything changed?" fingerprint included `max(last_seen_at)` — and **every request wrote `last_seen_at`** | the fingerprint changed on every single request, so every phone was pushed a full state snapshot endlessly. With ~20 phones that is ~60 unnecessary database reads **per second**, all competing with the shout's INSERT | presence is out of the fingerprint, and it is now written at most once every 30 s per phone |
+| The stream checked the database every 300 ms per phone, forever | idle connections kept a database pool of 3 busy doing nothing | 250 ms for 4 s after a change, then 600 ms, then 1 s after a quiet minute — and only **one check at a time** per connection |
+| SHOUT needed 7 statements, one after another (select live → count → insert draft → update → mark skipped → put on block → start) | on Neon each statement is ~40 ms, so the button waited ~300 ms before the room saw anything, and the admin panel waited for a full refresh too | the poll is **inserted already live**, the two roster writes are **one statement**, and counts/queue/log run **in parallel after the row is committed**. The admin button also paints the next name optimistically, in the same frame as the click |
+
+**Measured (with every query artificially delayed 40 ms to imitate Neon):**
+
+| Action | v4.0.0 | v4.1.0 |
+| --- | --- | --- |
+| SHOUT → name on the phone | 2–3 s | **0.44 s** average (worst 0.55 s) |
+| Lock in → confirmation | 1.5–2 s | **0.27 s** |
+| SHOUT write itself | ~0.7 s | **0.3 s** |
+
+`npm run test:latency` holds those two promises forever, and it runs against a server started with
+`DB_FAKE_LATENCY_MS=40 npm run dev`, so the numbers cannot quietly drift back up.
+
+### The projector stopped blinking
+
+The winners board used to repaint on every push — and every repaint restarted the card's entry
+animation, which is what looked like blinking. Now the board only re-fetches when a player is
+**actually sold**, and only touches the DOM when the answer **changes**. The bat-and-ball reveal
+still plays once per sold price, then the board holds completely still.
+
+Winners also carry **real medals** now — gold, silver and bronze discs with ribbons, drawn inline as
+SVG — that drop in and swing into place once, with a light sweep across the metal.
+
+## 4b-decies. 👤 Joining is name-only (v4.1.0)
+
+The join screen asks for **one thing: your name**. The employee ID field is gone.
+
+The internal person key is derived from the name (`@abhishek-navnath-menchekare`), so:
+
+- the same person coming back on a new phone reclaims their own record (one guess per player holds);
+- two people with a genuinely different name never collide;
+- anyone who *does* send an employee ID — the API, an old link, the admin's own "add participant" —
+  is still honoured, so nothing that already exists breaks.
+
+The admin participant list and the phone's greeting skip the key when it was auto-generated; the
+phone says "One guess per player" instead.
 
 ## 4b-quater. 📱 The guess screen is one screen — no scrolling
 
@@ -863,9 +909,10 @@ npm run test:ranking               # the scoring rule on its own (no DB needed)
 npm run test:phone-fit             # the phone guess card fits one screen, with no next-player hint
 npm run test:display               # the projector podium: 1st/2nd/3rd on the big screen
 npm run test:slider                # nobody else's vote moves your slider + the duck's batting loop
+npm run test:latency               # SHOUT <2 s and Lock in <1.5 s with a simulated Neon latency
 ```
 
-**Current results (local, v4.0.0), all with zero failures — 17 suites, 545 checks:**
+**Current results (local, v4.1.0), all with zero failures — 18 suites, 561 checks:**
 
 | Suite | Checks | What it proves |
 | --- | --- | --- |
@@ -878,8 +925,9 @@ npm run test:slider                # nobody else's vote moves your slider + the 
 | **`ledger`** | **36** | 3 rounds end to end: prices stored, exact winners, the "nobody exact" case, late settlement, leaderboard, CSV |
 | **`ranking`** | **31** | the scoring rule itself: exact bids win, nobody-exact, 5-way exact, right-bid-beats-near-miss, ties (no DB, no browser) |
 | **`phone-fit`** | **25** | one-screen guess card, greeting + counters kept, no next-player hint, duck waiting screen |
-| **`slider`** | **22** | another person's vote never moves your slider (phone **and** admin), no name/price/rank after a round, the duck bats then gets bowled |
-| **`display`** | **27** | big screen: bat-and-ball reveal, then 1st/2nd/3rd by right bids, closest calls as the small line, fits 1920×1080 |
+| **`slider`** | **22** |
+| **`latency`** | **15** | SHOUT → phone 0.44 s, Lock in 0.27 s at 40 ms/query; the board never rebuilds on incoming votes | another person's vote never moves your slider (phone **and** admin), no name/price/rank after a round, the duck bats then gets bowled |
+| **`display`** | **29** | big screen: bat-and-ball reveal, then 1st/2nd/3rd by right bids, closest calls as the small line, fits 1920×1080 |
 | `ui-rapid` | 18 | 10s…2 min presets, remembered across reloads, used by the next SHOUT |
 | `ui-session` | 30 | admin sign-in/session/logout |
 | `live` | 10 | start→phone 241 ms, vote→second phone 679 ms, price→phone cleared 1346 ms, fallback polling |
@@ -964,4 +1012,4 @@ role and base price, and the price you type when the hammer falls. That is all i
 
 ---
 
-*Cricket Auction Live Polling — v4.0.0 · Express + Postgres on Vercel · separate from the auction website.*
+*Cricket Auction Live Polling — v4.1.0 · Express + Postgres on Vercel · separate from the auction website.*

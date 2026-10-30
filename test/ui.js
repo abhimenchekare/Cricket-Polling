@@ -51,8 +51,7 @@ const PLAYER = `UI Player ${Date.now() % 100000}`;
   ok('join page renders', await p1.locator('#join-form').isVisible());
   await shot(p1, '01-join-mobile.png');
 
-  await p1.fill('#name', 'UI Tester');
-  await p1.fill('#employeeId', `UI-${Date.now() % 100000}`);
+  await p1.fill('#name', `UI Tester ${Date.now() % 100000}`);
   await p1.click('#join-submit');
   await p1.waitForTimeout(2000);
   ok('join lands on the poll screen', p1.url().includes('/poll') || (await p1.locator('#poll-area').count()) > 0);

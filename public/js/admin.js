@@ -306,7 +306,15 @@
         }));
       if (!okToGo) return;
 
-      setBusy(button, true, 'Shouting…');
+      /* Paint the next name on the button straight away — the host sees the shout land on their
+         own screen in one frame, and the room follows on the push. */
+      const optimistic = next ? next.name : null;
+      const restore = button.innerHTML;
+      if (optimistic) {
+        button.disabled = true;
+        button.classList.add('is-pending');
+        button.innerHTML = `${SHOUT_HORN}SHOUT: ${escapeHtml(optimistic).toUpperCase()}`;
+      }
       try {
         const res = await API.post('/api/admin/shout', {
           force: Boolean(force),
@@ -316,6 +324,8 @@
         });
         toast(`${res.shouted.name} is on the block`, 'ok');
         haptic && haptic(30);
+        /* The panel repaints from the push that follows the write; this refresh just makes sure
+           the button and the queue are already right on this screen. */
         window.AdminShell.refresh();
       } catch (err) {
         if (err.data && err.data.empty) {
@@ -325,8 +335,11 @@
         } else {
           toast(err.message, 'err');
         }
+        /* the shout did not happen — put the button back exactly as it was */
+        if (optimistic) button.innerHTML = restore;
       } finally {
-        setBusy(button, false);
+        button.disabled = false;
+        button.classList.remove('is-pending');
       }
     };
 

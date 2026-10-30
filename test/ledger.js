@@ -95,7 +95,6 @@ const STAMP = Date.now().toString().slice(-5);
     page.on('pageerror', (e) => errors.push(`[${g.name}] ${e.message}`));
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
     await page.fill('#name', g.name);
-    await page.fill('#employeeId', g.id);
     await page.click('#join-submit');
     await page.waitForTimeout(500);
     g.ctx = ctx;

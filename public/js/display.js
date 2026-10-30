@@ -14,6 +14,10 @@
   let lastSignature = '';
   let revealTimer = null;
   let firstLoad = true;
+  /* What the board is currently showing. Repainting identical numbers used to restart the entry
+     animations, which is why the winners appeared to blink over and over. */
+  let paintedSignature = '';
+  let lastSold = -1;
 
   const mainEl = document.getElementById('dp-main');
   const participantsEl = document.getElementById('dp-participants');
@@ -50,14 +54,21 @@
       onData: (payload) => {
         clockOffset = payload.serverTime - Date.now();
         if (participantsEl) participantsEl.textContent = payload.stats.participants;
-        loadBoard(false);
+        /* The standings query is the expensive one. Only run it when a player was actually sold —
+           a vote, a join or a heartbeat must never re-fetch the whole ledger. */
+        const sold = payload.auction ? Number(payload.auction.sold) || 0 : 0;
+        if (sold !== lastSold) {
+          lastSold = sold;
+          loadBoard(false);
+        }
       }
     });
 
     renderClock();
     setInterval(renderClock, 1000);
     loadBoard(true);
-    setInterval(() => loadBoard(false), 8000);
+    /* Safety net: if a push is ever missed the board still catches up, just gently. */
+    setInterval(() => lastSold = -1, 20000);
   }
 
   /* ------------------------------ the board ------------------------------ */
@@ -82,16 +93,24 @@
 
       const signature = board.standings
         .slice(0, 3)
-        .map((s) => `${s.name}:${s.nearest}:${s.exact}`)
+        .map((s) => `${s.name}:${s.exact}:${s.closest}:${s.top3}`)
         .join('|');
 
       const isNew = Boolean(previous && signature !== lastSignature);
       lastSignature = signature;
 
+      /* Only touch the DOM when the answer actually changed. Re-writing the same HTML every
+         couple of seconds restarts the entrance animation — that is the blinking. */
+      if (!force && signature === paintedSignature) return;
+
       /* first paint on load, and every time a result changes → bat meets ball first */
       if (force || isNew) {
-        playSwing(() => renderBoard());
+        playSwing(() => {
+          paintedSignature = signature;
+          renderBoard();
+        });
       } else {
+        paintedSignature = signature;
         renderBoard();
       }
       if (firstLoad) firstLoad = false;
@@ -102,6 +121,34 @@
 
   function medalLabel(rank) {
     return rank === 1 ? '1st' : rank === 2 ? '2nd' : '3rd';
+  }
+
+  /* A real medal: gold / silver / bronze, with ribbon. Drawn inline so it never needs a network
+     request on the projector. */
+  function medalSvg(rank) {
+    const tones = {
+      1: ['#ffe28a', '#f6c453', '#b8860b'],
+      2: ['#f2f6fb', '#cfd8e3', '#8e9bb0'],
+      3: ['#f5c99a', '#e0a370', '#9c6432']
+    };
+    const [light, mid, dark] = tones[rank] || tones[3];
+    return `
+      <svg class="dp-medal" viewBox="0 0 64 84" aria-hidden="true" focusable="false">
+        <defs>
+          <linearGradient id="dpMedalG${rank}" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="${light}" />
+            <stop offset="52%" stop-color="${mid}" />
+            <stop offset="100%" stop-color="${dark}" />
+          </linearGradient>
+        </defs>
+        <path d="M20 2 L30 34 L18 34 Z" fill="#e5484d" opacity=".9" />
+        <path d="M44 2 L34 34 L46 34 Z" fill="#2f6fed" opacity=".9" />
+        <circle cx="32" cy="52" r="27" fill="url(#dpMedalG${rank})" stroke="${dark}" stroke-width="2.5" />
+        <circle cx="32" cy="52" r="20" fill="none" stroke="${dark}" stroke-width="1.6" opacity=".55" />
+        <text x="32" y="60" text-anchor="middle" class="dp-medal-num">${rank}</text>
+        <path class="dp-medal-shine" d="M18 38 q6 -10 16 -12" stroke="#fff" stroke-width="3.4"
+              fill="none" stroke-linecap="round" opacity=".75" />
+      </svg>`;
   }
 
   function renderEmpty() {
@@ -151,6 +198,7 @@
             .map(
               (s) => `
             <div class="dp-winner rank-${s.rank}">
+              ${medalSvg(s.rank)}
               <div class="dp-winner-badge">${medalLabel(s.rank)}</div>
               <div class="dp-winner-name">${escapeHtml(s.name)}</div>
               <div class="dp-winner-score">

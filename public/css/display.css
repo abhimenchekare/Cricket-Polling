@@ -776,6 +776,78 @@
   border-color: rgba(224, 163, 112, 0.45);
 }
 
+/* ── medals ─────────────────────────────────────────────────────────────── */
+.dp-medal {
+  width: clamp(52px, 4.4vw, 86px);
+  height: auto;
+  display: block;
+  margin: 0 auto clamp(0px, 0.3vw, 6px);
+  filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.45));
+  animation: dpMedalDrop 0.85s cubic-bezier(0.16, 1.1, 0.3, 1) both;
+}
+
+.dp-winner.rank-1 .dp-medal {
+  animation-delay: 0.12s;
+}
+.dp-winner.rank-2 .dp-medal {
+  animation-delay: 0.26s;
+}
+.dp-winner.rank-3 .dp-medal {
+  animation-delay: 0.4s;
+}
+
+.dp-medal-num {
+  font: 900 26px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  fill: #5a3d00;
+  letter-spacing: -0.5px;
+}
+
+/* the light sweeping across the metal — once, not forever */
+.dp-medal-shine {
+  transform-origin: 32px 52px;
+  animation: dpMedalShine 1.1s ease-out both;
+}
+
+.dp-winner.rank-1 .dp-medal-shine {
+  animation-delay: 0.75s;
+}
+.dp-winner.rank-2 .dp-medal-shine {
+  animation-delay: 0.9s;
+}
+.dp-winner.rank-3 .dp-medal-shine {
+  animation-delay: 1.05s;
+}
+
+@keyframes dpMedalDrop {
+  0% {
+    opacity: 0;
+    transform: translateY(-34px) rotate(-14deg) scale(0.7);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(4px) rotate(3deg) scale(1.06);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) rotate(0deg) scale(1);
+  }
+}
+
+@keyframes dpMedalShine {
+  0% {
+    opacity: 0;
+    transform: translateX(-16px) scale(0.6);
+  }
+  35% {
+    opacity: 0.95;
+    transform: translateX(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(18px) scale(1.15);
+  }
+}
+
 @keyframes dpWinnerIn {
   from {
     opacity: 0;
@@ -1127,7 +1199,9 @@
   .dp-swing.is-playing .dp-swing-label {
     animation-duration: 0.9s;
   }
-  .dp-winner {
+  .dp-winner,
+  .dp-medal,
+  .dp-medal-shine {
     animation: none;
   }
 }

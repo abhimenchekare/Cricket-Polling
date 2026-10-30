@@ -122,6 +122,7 @@ router.get('/stream', async (req, res) => {
   let timer = null;
   let lastFingerprint = null;
   let lastSentAt = 0;
+  let lastChangeAt = 0;
   const startedAt = Date.now();
   const MAX_MS = 45_000;
 
@@ -156,6 +157,7 @@ router.get('/stream', async (req, res) => {
     if (!closed) res.write(': ping\n\n');
   }, 15_000);
 
+  let ticking = false;
   const tick = async () => {
     if (closed) return;
     if (Date.now() - startedAt > MAX_MS) {
@@ -163,17 +165,27 @@ router.get('/stream', async (req, res) => {
       if (!closed) res.write('event: bye\ndata: {}\n\n');
       return res.end();
     }
-    try {
-      const fp = await state.stateFingerprint();
-      if (fp && fp !== lastFingerprint) {
-        await pushState('change');
+    /* One check at a time per connection. Overlapping checks used to stack up on a slow
+       database and made everything else queue behind them. */
+    if (!ticking) {
+      ticking = true;
+      try {
+        const fp = await state.stateFingerprint();
+        if (fp && fp !== lastFingerprint) {
+          await pushState('change');
+          lastChangeAt = Date.now();
+        }
+      } catch {
+        /* transient DB hiccup — keep the connection, retry on the next tick */
+      } finally {
+        ticking = false;
       }
-    } catch {
-      /* transient DB hiccup — keep the connection, retry on the next tick */
     }
-    // Fast while people are voting, calmer when the room is idle.
-    const idleFor = Date.now() - lastSentAt;
-    const delay = idleFor > 20_000 ? 900 : 300;
+    /* Watch closely for 4 s after a change (a room full of people voting), then a brisk 600 ms,
+       and only really relax after a quiet minute — the database has other work to do, but the
+       phone in someone's hand must never wait long enough to notice. */
+    const sinceChange = Date.now() - Math.max(lastChangeAt, startedAt);
+    const delay = sinceChange < 4000 ? 250 : sinceChange < 60_000 ? 600 : 1000;
     timer = setTimeout(tick, delay);
   };
 
@@ -189,6 +201,19 @@ router.get('/stream', async (req, res) => {
 
 /* ---------------------------------- join --------------------------------- */
 
+/** The internal person key when the audience only gives a name: "@priya-sharma". */
+function nameKey(name) {
+  const slug = String(name)
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
+  return `@${slug || 'guest'}`;
+}
+
+
 router.post('/join', async (req, res, next) => {
   try {
     if (!rateLimit(clientKey(req, 'join'), 30, 60_000)) {
@@ -200,14 +225,20 @@ router.post('/join', async (req, res, next) => {
     }
 
     const name = cleanName(req.body?.name);
-    const employeeId = cleanEmployeeId(req.body?.employeeId);
+    const typedId = cleanEmployeeId(req.body?.employeeId);
     const code = String(req.body?.code || '').trim();
 
     if (name.length < 2) return res.status(400).json({ error: 'Please enter your full name' });
-    if (employeeId.length < 2) {
-      return res.status(400).json({ error: 'Please enter your employee ID or access code' });
+
+    /* v4.1.0 — the join page asks for a name and nothing else. The internal key is derived from
+       the name, so the same person coming back on a new phone picks up their own record, and two
+       people with the same name are kept apart rather than silently merged. An employee ID is
+       still honoured when one is sent (API clients, the old links, the admin's own imports). */
+    const employeeId = typedId && typedId.length >= 2 ? typedId : nameKey(name);
+    if (typedId && typedId.length === 1) {
+      return res.status(400).json({ error: 'That employee ID looks too short' });
     }
-    if (!/^[A-Za-z0-9._/-]+$/.test(employeeId)) {
+    if (typedId && !/^[A-Za-z0-9._/-]+$/.test(typedId)) {
       return res.status(400).json({ error: 'Employee ID can contain letters, numbers, . _ / - only' });
     }
     if (

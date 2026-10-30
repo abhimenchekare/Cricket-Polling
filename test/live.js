@@ -107,7 +107,6 @@ async function json(url, options = {}) {
   const audience = await audienceCtx.newPage();
   await audience.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
   await audience.fill('#name', `Live ${Date.now() % 100000}`);
-  await audience.fill('#employeeId', `LIVE-${Date.now() % 1000000}`);
   await audience.click('#join-submit');
   await audience.waitForTimeout(1200);
   await audience.goto(`${BASE}/poll`, { waitUntil: 'domcontentloaded' });
@@ -147,7 +146,6 @@ async function json(url, options = {}) {
   // a phone with no session is sent to the join screen, so join first
   await second.goto(BASE, { waitUntil: 'domcontentloaded' });
   await second.fill('#name', 'Live Second');
-  await second.fill('#employeeId', `LIVE2-${Date.now() % 1000000}`);
   await second.click('#join-submit');
   await second.waitForTimeout(800);
   await second.goto(`${BASE}/poll`, { waitUntil: 'domcontentloaded' });
@@ -221,7 +219,6 @@ async function json(url, options = {}) {
   await fb.route('**/api/stream', (route) => route.abort());
   await fb.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
   await fb.fill('#name', `Fb ${Date.now() % 100000}`);
-  await fb.fill('#employeeId', `FB-${Date.now() % 1000000}`);
   await fb.click('#join-submit');
   await fb.waitForTimeout(1200);
   await fb.goto(`${BASE}/poll`, { waitUntil: 'domcontentloaded' });

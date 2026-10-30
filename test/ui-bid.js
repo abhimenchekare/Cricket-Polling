@@ -114,8 +114,7 @@ async function cleanLeftovers() {
   const p = await mobile.newPage();
   watch(p, 'participant');
   await p.goto(BASE, { waitUntil: 'networkidle' });
-  await p.fill('#name', 'Drag Tester');
-  await p.fill('#employeeId', 'UI-BID-' + Date.now().toString().slice(-6));
+  await p.fill('#name', 'Drag Tester ' + Date.now().toString().slice(-6));
   await p.click('#join-submit');
   await p.waitForURL('**/poll', { timeout: 12000 });
   await p.waitForTimeout(2500);

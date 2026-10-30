@@ -56,7 +56,14 @@ function isTransient(err) {
   return TRANSIENT.test(String(err.message || ''));
 }
 
+/* Test-only: pretend every query crosses a network (a Neon round trip is 20–60 ms).
+   Used by test/latency.js to prove that SHOUT and Lock in stay fast on a slow database.
+   Never set in production. */
+const FAKE_LATENCY_MS = Number(process.env.DB_FAKE_LATENCY_MS || 0);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function rawQuery(text, params) {
+  if (FAKE_LATENCY_MS > 0) await sleep(FAKE_LATENCY_MS);
   try {
     return await pool.query(text, params);
   } catch (err) {

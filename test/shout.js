@@ -129,7 +129,6 @@ const ROSTER = [
   watch(phone, 'phone');
   await phone.goto(BASE, { waitUntil: 'domcontentloaded' });
   await phone.fill('#name', `Shout Tester ${STAMP}`);
-  await phone.fill('#employeeId', `SHOUT-${STAMP}`);
   await phone.click('#join-submit');
   await phone.waitForTimeout(1500);
   await phone.goto(`${BASE}/poll`, { waitUntil: 'domcontentloaded' });

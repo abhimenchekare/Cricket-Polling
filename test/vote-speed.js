@@ -101,8 +101,7 @@ const STAMP = Date.now().toString().slice(-5);
     }
 
     await page.goto(BASE, { waitUntil: 'domcontentloaded' });
-    await page.fill('#name', `Speed ${STAMP}`);
-    await page.fill('#employeeId', employeeId);
+    await page.fill('#name', `Speed ${label || employeeId} ${STAMP}`);
     await page.click('#join-submit');
     await page.waitForTimeout(600);
 

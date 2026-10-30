@@ -45,12 +45,16 @@ async function getParticipantByToken(token) {
     [token]
   );
   if (!row) return null;
+  /* Presence + freshness (best effort — never block the request).
+     Throttled to once every 30 s per person: the audience screen calls /api/state every couple of
+     seconds, and writing presence on every call was flooding the database on Vercel. */
   const now = Date.now();
-  // Presence + freshness (best effort — never block the request)
-  Promise.all([
-    q('UPDATE participants SET last_seen_at = $1 WHERE id = $2', [now, row.id]),
-    q('UPDATE participant_sessions SET last_seen_at = $1 WHERE token = $2', [now, token])
-  ]).catch(() => {});
+  if (now - Number(row.last_seen_at || 0) > 30_000) {
+    Promise.all([
+      q('UPDATE participants SET last_seen_at = $1 WHERE id = $2', [now, row.id]).catch(() => {}),
+      q('UPDATE participant_sessions SET last_seen_at = $1 WHERE token = $2', [now, token]).catch(() => {})
+    ]).catch(() => {});
+  }
   return row;
 }
 

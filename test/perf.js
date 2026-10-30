@@ -70,7 +70,6 @@ function pct(list, p) {
   // participant join → live poll screen
   await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' });
   await page.fill('#name', `Perf ${Date.now() % 10000}`);
-  await page.fill('#employeeId', `PERF-${Date.now() % 100000}`);
   await page.click('#join-submit');
   await page.waitForTimeout(1200);
 

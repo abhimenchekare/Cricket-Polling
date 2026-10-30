@@ -443,15 +443,21 @@ const PUBLIC_STATE_SQL = `
  * Fingerprint of everything a viewer can see. One cheap query; the live stream compares it on a
  * timer and pushes the full state the instant it changes.
  */
+/*
+  What counts as "something changed"?
+
+  Only things the audience can actually see. Presence (`last_seen_at`) is deliberately NOT here:
+  every request writes it, so including it made the stream push a full state snapshot to every
+  phone forever — which is what made SHOUT and Lock in feel like 2–3 seconds on Vercel.
+*/
 const FINGERPRINT_SQL = `
   SELECT md5(concat_ws('~',
     (SELECT COALESCE(sum(revision), 0)::text FROM polls),
     (SELECT COUNT(*)::text FROM votes),
     (SELECT COUNT(*)::text FROM participants),
-    (SELECT COALESCE(sum(COALESCE(actual_lakh, 0)), 0)::text FROM polls),
+    (SELECT COUNT(*)::text FROM participants WHERE blocked = 1),
     (SELECT COALESCE(string_agg(key || '=' || value, ',' ORDER BY key), '') FROM settings),
-    (SELECT COALESCE(max(last_seen_at), 0)::text FROM participants),
-    (SELECT COALESCE(string_agg(status, '' ORDER BY position, id), '') FROM auction_players)
+    (SELECT COALESCE(string_agg(status || COALESCE(sold_lakh::text, ''), '' ORDER BY position, id), '') FROM auction_players)
   )) AS fingerprint`;
 
 async function stateFingerprint() {
