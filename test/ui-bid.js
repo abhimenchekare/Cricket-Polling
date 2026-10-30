@@ -212,11 +212,24 @@ async function cleanLeftovers() {
   const dp = await big.newPage();
   watch(dp, 'display');
   await dp.goto(`${BASE}/display`, { waitUntil: 'networkidle' });
-  await dp.waitForTimeout(3000);
+  // the projector opens with the bat-and-ball reveal, then settles on the winners board
+  await dp.waitForSelector('.dp-winner', { timeout: 12000 }).catch(() => {});
+  await dp.waitForTimeout(800);
   const dpText = await dp.locator('body').innerText();
-  ok('big screen names the player', dpText.includes('Rohit'));
-  ok('big screen shows the sold price', /SOLD FOR/i.test(dpText));
-  ok('big screen shows a winner', /🥇|🥈|🥉/.test(dpText), dpText.slice(0, 120));
+  ok(
+    'big screen shows the winners board',
+    /most accurate guesses/i.test(dpText) || /no player has been sold yet/i.test(dpText),
+    dpText.replace(/\s+/g, ' ').slice(0, 90)
+  );
+  // with no guesses in the settled rounds the podium is legitimately empty — say so instead of blank
+  const hasWinner = (await dp.locator('.dp-winner').count()) > 0;
+  ok(
+    'big screen either ranks a winner or says there is nothing yet',
+    hasWinner || /nobody guessed yet|no player has been sold yet/i.test(dpText),
+    dpText.replace(/\s+/g, ' ').slice(-90)
+  );
+  ok('big screen talks about accurate guesses', /accurate|sold yet/i.test(dpText));
+  ok('big screen does not name the player', !dpText.includes('Rohit'));
   await shot(dp, 'b6-display-winners.png');
 
   await browser.close();

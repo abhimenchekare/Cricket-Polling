@@ -12,7 +12,7 @@ A complete live polling website for your office cricket auction, built to run **
 
 ---
 
-## What this app does (v3.5.0 — auction list + SHOUT)
+## What this app does (v3.8.0 — auction list + SHOUT)
 
 An office-cricket-auction companion for the audience's phones.
 
@@ -224,7 +224,7 @@ player is shouted. There is a `Stay here` button if someone wants to read it fir
 
 Countdowns under a minute show as plain seconds (`15s`, `8s`); longer ones stay `mm:ss`.
 
-## 4b-bis. ⚡ The Lock-in button answers in ~100 ms (v3.5.0)
+## 4b-bis. ⚡ The Lock-in button answers in ~100 ms (v3.8.0)
 
 The complaint: *"when they select bid submit, it takes 3-4 seconds."* Three separate delays were
 stacked on top of each other, and none of them were the database.
@@ -249,6 +249,37 @@ all. The test enforces it — if a future change reintroduces a blocking call on
 
 The confirmation document itself is also prefetched while the round is open, so the tap has nothing
 left to download.
+
+## 4c-pre. 🖥 The big screen: winners only, after a bat-and-ball reveal
+
+The projector (`/display`, press **F** for full screen) shows **one thing**: who has guessed the most
+players accurately.
+
+```
+        MOST ACCURATE GUESSES                    7 of 70 players sold
+┌───────────────────────┐ ┌───────────────────┐ ┌───────────────────┐
+│  (1st)                │ │  (2nd)            │ │  (3rd)            │
+│  Saurabh Banokar      │ │  Neha Kulkarni    │ │  Arjun Rao        │
+│  12 accurate guesses  │ │  10 accurate      │ │  9 accurate       │
+│                       │ │                   │ │  2 spot on        │
+└───────────────────────┘ └───────────────────┘ └───────────────────┘
+```
+
+- **No player name, no question, no sold price** on the projector. The room reads the standings;
+  the phones show the round. (Earlier builds put the live round on the big screen — removed on
+  request.)
+- **The bat-and-ball reveal** plays over a 2-second beat every time a result lands: the bat swings,
+  the ball is struck, the screen flashes, **SIX!** slams in — and the winners fade in behind it.
+  Press **R** to replay it on demand.
+- It refreshes by itself the moment a sold price is entered, and every 8 s as a safety net.
+- With no sales yet it shows a calm "no player has been sold yet" screen, and if prices exist but
+  nobody guessed it says so rather than showing an empty podium.
+- Fits 1920×1080: winner names render at ~50 px, the board sits between header and footer.
+- Respects `prefers-reduced-motion` (the swing compresses to a short fade).
+
+`npm run test:display` covers all of it (20 checks: the reveal plays first, winners stay hidden
+during it, places match the API, nothing from the live round leaks, the layout fits, and a new sold
+price replays the reveal and moves the counter).
 
 ## 4b-quater. 📱 The guess screen is one screen — no scrolling
 
@@ -727,9 +758,10 @@ npm run test:vote-speed            # Lock-in latency (cold-function simulation)
 npm run test:ledger                # 70-player results: stored prices, top-3 winners, leaderboard
 npm run test:ranking               # the scoring rule on its own (no DB needed)
 npm run test:phone-fit             # the phone guess card fits one screen, with no next-player hint
+npm run test:display               # the projector podium: 1st/2nd/3rd on the big screen
 ```
 
-**Current results (local, v3.5.0), all with zero failures:**
+**Current results (local, v3.8.0), all with zero failures:**
 
 | Suite | Checks | What it proves |
 | --- | --- | --- |
@@ -742,9 +774,10 @@ npm run test:phone-fit             # the phone guess card fits one screen, with 
 | **`ledger`** | **32** | 3 rounds end to end: prices stored, 1st/2nd/3rd correct, late settlement, leaderboard, CSV |
 | **`ranking`** | **16** | the scoring rule itself, incl. 65-vs-60 accurate guesses over 70 players (no DB, no browser) |
 | **`phone-fit`** | **13** | one-screen guess card: no scroll, slider + button visible, no next-player hint, long names |
+| **`display`** | **20** | big screen: bat-and-ball reveal, then 1st/2nd/3rd place, no player name, fits 1920×1080 |
 | `ui-rapid` | 18 | 10s…2 min presets, remembered across reloads, used by the next SHOUT |
 | `ui-session` | 30 | admin sign-in/session/logout |
-| `live` | 10 | start→phone 276 ms, vote→projector 123 ms, price→winners 244 ms, fallback polling |
+| `live` | 10 | start→phone 241 ms, vote→second phone 679 ms, price→winners 1343 ms, fallback polling |
 | `routes` | 21 | `/admin/players` and every other route on a real deployment |
 | `config` | 36 | Vercel rewrites, serverless layout, no Socket.IO / QR / local-file DB |
 | `perf` | 3 | `/api/state` p95 32 ms, poll screen usable in 78 ms |
@@ -826,4 +859,4 @@ role and base price, and the price you type when the hammer falls. That is all i
 
 ---
 
-*Cricket Auction Live Polling — v3.5.0 · Express + Postgres on Vercel · separate from the auction website.*
+*Cricket Auction Live Polling — v3.8.0 · Express + Postgres on Vercel · separate from the auction website.*

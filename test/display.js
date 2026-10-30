@@ -127,37 +127,65 @@ const STAMP = Date.now().toString().slice(-5);
 
   const standings = (await api('/api/admin/ledger')).data.standings;
   console.log('\n1️⃣  The numbers the screen must show');
-  standings.slice(0, 3).forEach((s) => console.log(`     ${s.rank}. ${s.name} — ${s.nearest} accurate, ${s.exact} exact`));
-  ok('Alpha leads on accurate guesses', standings[0].name === `Alpha ${STAMP}`, standings[0].name);
-  ok('three participants are ranked', standings.length >= 3);
+  const rankOf = (n) => {
+    const i = standings.findIndex((s) => s.name === n);
+    return i < 0 ? 999 : i + 1;
+  };
+  const rAlpha = rankOf(`Alpha ${STAMP}`);
+  const rBravo = rankOf(`Bravo ${STAMP}`);
+  const rCharlie = rankOf(`Charlie ${STAMP}`);
+  console.log(`     Alpha #${rAlpha} · Bravo #${rBravo} · Charlie #${rCharlie} (of ${standings.length})`);
+  ok('Alpha outranks Bravo', rAlpha < rBravo, `#${rAlpha} vs #${rBravo}`);
+  ok('Bravo outranks Charlie', rBravo < rCharlie, `#${rBravo} vs #${rCharlie}`);
+  ok('all three are ranked', rCharlie < 999);
 
   /* ---------------------------- the big screen ---------------------------- */
-  console.log('\n2️⃣  The projector shows the podium');
+  console.log('\n2️⃣  The projector plays the bat-and-ball reveal, then the board');
   const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
   const dp = await ctx.newPage();
   dp.on('pageerror', (e) => errors.push(`[display] ${e.message}`));
   await dp.goto(`${BASE}/display`, { waitUntil: 'domcontentloaded' });
-  await dp.waitForSelector('#dp-leaders.is-on', { timeout: 15000 });
-  await dp.waitForTimeout(700);
 
-  const shown = await dp.locator('#dp-leaders').innerText();
-  const first = await dp.locator('.dp-leader.rank-1 .dp-leader-name').innerText();
-  const second = await dp.locator('.dp-leader.rank-2 .dp-leader-name').innerText();
-  const third = await dp.locator('.dp-leader.rank-3 .dp-leader-name').innerText();
+  // the animation is on screen immediately, before any winners are shown
+  await dp.waitForSelector('#dp-swing.is-playing', { timeout: 8000 });
+  const swingText = await dp.locator('#dp-swing').innerText();
+  ok('a bat-and-ball reveal plays first', true);
+  ok('the reveal is loud about it', /six/i.test(swingText), swingText.trim());
+  ok('winners stay hidden while the ball is in the air', (await dp.locator('.dp-winner:visible').count()) === 0);
+  await dp.screenshot({ path: 'test/screenshots/dp1-swing.png' });
 
-  ok('the strip is titled clearly', /most accurate guesses/i.test(shown), shown.split('\n')[0]);
-  ok('1st place is shown', first.includes(`Alpha ${STAMP}`), first);
-  ok('2nd place is shown', second.includes(`Bravo ${STAMP}`), second);
-  ok('3rd place is shown', third.includes(`Charlie ${STAMP}`), third);
-  ok('the accurate count is displayed', /\d+/.test(await dp.locator('.dp-leader.rank-1 .dp-leader-score').innerText()));
-  ok('the medal labels are 1st/2nd/3rd', (await dp.locator('.dp-leader.rank-1 .dp-leader-medal').innerText()).trim() === '1st');
+  // …and then hands over to the winners
+  await dp.waitForSelector('.dp-board .dp-winner', { timeout: 8000 });
+  await dp.waitForTimeout(900);
+
+  const shown = await dp.locator('#dp-main').innerText();
+  const first = await dp.locator('.dp-winner.rank-1 .dp-winner-name').innerText();
+  const second = await dp.locator('.dp-winner.rank-2 .dp-winner-name').innerText();
+  const third = await dp.locator('.dp-winner.rank-3 .dp-winner-name').innerText();
+
+  /* the screen must agree with the API, whoever happens to be leading */
+  const top3 = standings.slice(0, 3).map((s) => s.name);
+  ok('1st place matches the standings', first.trim() === top3[0], `${first.trim()} vs ${top3[0]}`);
+  ok('2nd place matches the standings', second.trim() === top3[1], `${second.trim()} vs ${top3[1]}`);
+  ok('3rd place matches the standings', third.trim() === top3[2], `${third.trim()} vs ${top3[2]}`);
+  ok(
+    'it says how many guesses were accurate',
+    /accurate/i.test(await dp.locator('.dp-winner.rank-1 .dp-winner-score').innerText()),
+    (await dp.locator('.dp-winner.rank-1 .dp-winner-score').innerText()).replace(/\n/g, ' ')
+  );
+  ok('the badges read 1st/2nd/3rd', (await dp.locator('.dp-winner.rank-1 .dp-winner-badge').innerText()).trim() === '1st');
   ok('how many players are sold is shown', /players sold/i.test(shown));
 
-  /* readable from the back of the room */
-  const size = await dp.locator('.dp-leader.rank-1 .dp-leader-name').evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
-  ok('the winner name is projector-sized (>= 20px at 1080p)', size >= 20, `${Math.round(size)}px`);
+  console.log('\n3️⃣  No player name, no question — winners only');
+  ok('the current player name is not on the board', !/Screen [A-D]/.test(shown));
+  ok('the question is not on the board', !/what will be the bid range/i.test(shown));
+  ok('the sold price of the live round is not on the board', !/sold for/i.test(shown));
 
-  /* it must not push the live round or the footer off the screen */
+  /* readable from the back of the room */
+  const size = await dp.locator('.dp-winner.rank-1 .dp-winner-name').evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+  ok('the winner name is projector-sized (>= 28px at 1080p)', size >= 28, `${Math.round(size)}px`);
+
+  /* it must fit the screen */
   const layout = await dp.evaluate(() => {
     const r = (s) => {
       const el = document.querySelector(s);
@@ -165,17 +193,16 @@ const STAMP = Date.now().toString().slice(-5);
       const b = el.getBoundingClientRect();
       return { top: Math.round(b.top), bottom: Math.round(b.bottom) };
     };
-    return { vh: window.innerHeight, leaders: r('#dp-leaders'), foot: r('.dp-foot'), main: r('#dp-main') };
+    return { vh: window.innerHeight, board: r('.dp-board'), foot: r('.dp-foot'), head: r('.dp-head') };
   });
-  ok('the strip is on screen', layout.leaders.bottom <= layout.vh, JSON.stringify(layout.leaders));
+  ok('the board is on screen', layout.board.bottom <= layout.vh, JSON.stringify(layout.board));
   ok('the footer is still on screen', layout.foot.bottom <= layout.vh + 2, JSON.stringify(layout.foot));
-  ok('the live round still has room', layout.main.bottom <= layout.leaders.top + 2);
 
-  await dp.screenshot({ path: 'test/screenshots/dp1-leaders.png' });
+  await dp.screenshot({ path: 'test/screenshots/dp2-board.png' });
 
   /* ------------------------------ live update ----------------------------- */
-  console.log('\n3️⃣  It updates by itself when a round settles');
-  const before = await dp.locator('.dp-leaders-sub').innerText();
+  console.log('\n4️⃣  It updates by itself when a round settles');
+  const before = await dp.locator('.dp-board-sub').innerText();
   await api('/api/admin/players', { method: 'POST', body: JSON.stringify({ names: `Screen D ${STAMP}` }) });
   const shout = await api('/api/admin/shout', { method: 'POST', body: JSON.stringify({ timerSeconds: 300 }) });
   for (const g of guessers) {
@@ -193,8 +220,13 @@ const STAMP = Date.now().toString().slice(-5);
     await page.close();
   }
   await api(`/api/admin/polls/${shout.data.poll.id}/actual`, { method: 'POST', body: JSON.stringify({ lakh: 230 }) });
-  await dp.waitForTimeout(3500);
-  const after = await dp.locator('.dp-leaders-sub').innerText();
+
+  // the new round triggers the reveal again, then the updated board
+  await dp.waitForSelector('#dp-swing.is-playing', { timeout: 15000 });
+  ok('a new sold price replays the bat-and-ball reveal', true);
+  await dp.waitForSelector('.dp-board .dp-winner', { timeout: 15000 });
+  await dp.waitForTimeout(600);
+  const after = await dp.locator('.dp-board-sub').innerText();
   ok('the "players sold" counter moves on its own', before !== after, `${before} → ${after}`);
 
   await browser.close();

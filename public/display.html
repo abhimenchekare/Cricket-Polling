@@ -6,8 +6,8 @@
 <meta name="theme-color" content="#03060f" />
 <title>Big Screen · Cricket Auction Live Polls</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏏</text></svg>" />
-<link rel="stylesheet" href="/css/theme.css?v=3.6.0" />
-<link rel="stylesheet" href="/css/display.css?v=3.6.0" />
+<link rel="stylesheet" href="/css/theme.css?v=3.8.0" />
+<link rel="stylesheet" href="/css/display.css?v=3.8.0" />
 </head>
 <body class="display-body">
 <div class="dp-controls">
@@ -34,8 +34,8 @@
         <div class="dp-stat-label">Participants</div>
       </div>
       <div class="dp-stat">
-        <div class="dp-stat-value" id="dp-votes">0</div>
-        <div class="dp-stat-label">Votes</div>
+        <div class="dp-stat-value" id="dp-sold">0</div>
+        <div class="dp-stat-label">Players sold</div>
       </div>
       <div class="dp-clock" id="dp-clock">--:--</div>
     </div>
@@ -47,13 +47,11 @@
     </div>
   </main>
 
-  <section class="dp-leaders" id="dp-leaders" aria-live="polite"></section>
-
   <footer class="dp-foot">
     <div class="dp-qr">
       <div style="font-size:clamp(20px,2vw,34px)">📱</div>
       <div>
-        <div class="dp-qr-text">Open this link on your phone to vote</div>
+        <div class="dp-qr-text">Open this link on your phone to guess</div>
         <div class="dp-qr-url" id="dp-url">—</div>
       </div>
     </div>
@@ -61,7 +59,59 @@
   </footer>
 </div>
 
-<script src="/js/app.js?v=3.6.0"></script>
-<script src="/js/display.js?v=3.6.0"></script>
+<!-- 🏏 the reveal: bat meets ball, then the winners appear -->
+<div class="dp-swing" id="dp-swing" aria-hidden="true">
+  <div class="dp-swing-flash"></div>
+  <svg class="dp-swing-svg" viewBox="0 0 480 240" preserveAspectRatio="xMidYMid meet">
+    <defs>
+      <linearGradient id="batBlade" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#f7e2b4" />
+        <stop offset="55%" stop-color="#e7c088" />
+        <stop offset="100%" stop-color="#cfa568" />
+      </linearGradient>
+      <radialGradient id="ballGlow" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#ff8a8a" stop-opacity=".9" />
+        <stop offset="100%" stop-color="#e5484d" stop-opacity="0" />
+      </radialGradient>
+    </defs>
+
+    <!-- swing trails -->
+    <g class="dp-arcs" fill="none" stroke-linecap="round">
+      <path class="dp-arc a1" d="M132 168 Q196 60 292 118" stroke="#34d399" stroke-width="5" />
+      <path class="dp-arc a2" d="M120 146 Q188 44 288 100" stroke="#ffd166" stroke-width="3" />
+    </g>
+
+    <!-- the bat: handle at the shoulder, blade sweeping through the ball -->
+    <g class="dp-bat" transform="translate(120 110)">
+      <rect x="-34" y="-7" width="34" height="14" rx="6" fill="#241a10" />
+      <rect x="-8" y="-5" width="16" height="10" rx="4" fill="#b8794a" />
+      <path d="M6 -12 L108 -16 Q132 -17 133 -1 Q134 15 110 17 L6 13 Z" fill="url(#batBlade)" />
+      <path d="M6 -12 L108 -16 Q124 -16.6 130 -10 L8 -3 Z" fill="#fdf0d2" opacity=".75" />
+      <path d="M6 13 L110 17 Q124 17.4 130 11 L8 5 Z" fill="#b98f52" opacity=".5" />
+    </g>
+
+    <!-- the ball -->
+    <g class="dp-ball-wrap" transform="translate(190 148)">
+      <circle class="dp-ball-trail" r="16" fill="url(#ballGlow)" />
+      <circle class="dp-ball" r="11" fill="#e5484d" />
+      <circle cx="-3.5" cy="-3.5" r="3.2" fill="#ff9d9d" opacity=".85" />
+      <path class="dp-ball-seam" d="M-8 -6 Q0 0 -8 6" stroke="#fff" stroke-width="1.7" fill="none" opacity=".85" />
+    </g>
+
+    <!-- impact -->
+    <g class="dp-impact" transform="translate(190 148)">
+      <circle r="16" fill="#fff" opacity="0.18" />
+      <circle r="11" fill="none" stroke="#fff" stroke-width="2.5" opacity="0.9" />
+      <g stroke="#ffd166" stroke-width="3.4" stroke-linecap="round">
+        <path d="M0 -24 V-38" /><path d="M0 24 V38" /><path d="M-24 0 H-38" /><path d="M24 0 H38" />
+        <path d="M-17 -17 L-27 -27" /><path d="M17 -17 L27 -27" /><path d="M-17 17 L-27 27" /><path d="M17 17 L27 27" />
+      </g>
+    </g>
+  </svg>
+  <div class="dp-swing-label">SIX!</div>
+</div>
+
+<script src="/js/app.js?v=3.8.0"></script>
+<script src="/js/display.js?v=3.8.0"></script>
 </body>
 </html>

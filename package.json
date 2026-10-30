@@ -1,6 +1,6 @@
 {
   "name": "cricket-polling-vercel",
-  "version": "3.6.0",
+  "version": "3.8.0",
   "private": true,
   "description": "Live polling website for an office cricket auction \u2014 Vercel + Postgres edition",
   "scripts": {

@@ -139,18 +139,28 @@ async function json(url, options = {}) {
   const audienceMs = Date.now() - t0;
   ok(`audience phone shows the poll in under ${SLOW_MS} ms`, audienceMs < SLOW_MS, `${audienceMs} ms`);
 
-  await display
+  /* the projector is the winners board now, so the second screen measured is another phone */
+  const secondCtx = await browser.newContext();
+  const second = await secondCtx.newPage();
+  // a phone with no session is sent to the join screen, so join first
+  await second.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await second.fill('#name', 'Live Second');
+  await second.fill('#employeeId', `LIVE2-${Date.now() % 1000000}`);
+  await second.click('#join-submit');
+  await second.waitForTimeout(800);
+  await second.goto(`${BASE}/poll`, { waitUntil: 'domcontentloaded' });
+  await second
     .waitForFunction((q) => document.body.innerText.includes(q), playerName, { timeout: 15000, polling: 16 })
     .catch(() => {});
   const displayMs = Date.now() - t0;
-  ok(`projector screen shows the poll in under ${SLOW_MS} ms`, displayMs < SLOW_MS, `${displayMs} ms`);
+  ok(`a second phone shows the poll in under ${SLOW_MS} ms`, displayMs < SLOW_MS, `${displayMs} ms`);
 
-  /* ---------------- a vote reaches the projector ---------------- */
+  /* ---------------- a vote reaches the other phone ---------------- */
   const voteCountIn = (text) => {
     const m = text.match(/\b([1-9]\d*)\s+(?:vote|votes|guess|guesses)\b/i);
     return m ? Number(m[1]) : 0;
   };
-  const before = voteCountIn(await display.evaluate(() => document.body.innerText));
+  const before = voteCountIn(await second.evaluate(() => document.body.innerText));
 
   await audience.locator('#bid-range').first().fill('30').catch(() => {});
   await audience.waitForTimeout(200);
@@ -165,7 +175,7 @@ async function json(url, options = {}) {
     .catch(() => false);
   ok('the audience vote was accepted', voted);
 
-  await display
+  await second
     .waitForFunction(
       (prev) => {
         const m = document.body.innerText.match(/\b([1-9]\d*)\s+(?:vote|votes|guess|guesses)\b/i);
@@ -176,7 +186,7 @@ async function json(url, options = {}) {
     )
     .catch(() => {});
   const voteMs = Date.now() - tVote;
-  ok(`the vote shows on the projector in under ${SLOW_MS + 500} ms`, voteMs < SLOW_MS + 500, `${voteMs} ms`);
+  ok(`the vote shows on the other phone in under ${SLOW_MS + 500} ms`, voteMs < SLOW_MS + 500, `${voteMs} ms`);
 
   /* ---------------- closing reveals results instantly ---------------- */
   const tClose = Date.now();

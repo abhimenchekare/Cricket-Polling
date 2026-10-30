@@ -171,8 +171,11 @@ const PLAYER = `UI Player ${Date.now() % 100000}`;
   const proj = await projCtx.newPage();
   watch(proj, 'display');
   await proj.goto(`${BASE}/display`, { waitUntil: 'networkidle' });
-  await proj.waitForTimeout(2500);
-  ok('projector shows the winners', /winner|🥇|2\.00 Cr/i.test(await proj.locator('body').innerText()));
+  // bat-and-ball reveal first, then the winners board
+  await proj.waitForSelector('.dp-winner, .dp-idle', { timeout: 12000 }).catch(() => {});
+  await proj.waitForTimeout(2600);
+  const projText = await proj.locator('body').innerText();
+  ok('projector shows the winners board', /most accurate guesses|no player has been sold/i.test(projText), projText.slice(0, 80));
   await shot(proj, '09-display-winners.png');
 
   await p1.goto(`${BASE}/poll`, { waitUntil: 'networkidle' });

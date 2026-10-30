@@ -1,36 +1,45 @@
-/* Full-screen presentation mode */
+/* Full-screen presentation mode — the winners board.
+ *
+ * The big screen answers one question only: who has guessed the most players accurately?
+ * 1st, 2nd and 3rd, with how many accurate guesses each of them has.
+ *
+ * Every time a sold price lands, a bat-and-ball reveal plays before the winners reappear.
+ */
 (function () {
   'use strict';
-  const { API, escapeHtml, formatClock } = window.App;
+  const { API, escapeHtml } = window.App;
 
-  let state = null;
+  let board = null;
   let clockOffset = 0;
-  let lastStatus = null;
-  let lastPollId = null;
+  let lastSignature = '';
+  let revealTimer = null;
+  let firstLoad = true;
 
   const mainEl = document.getElementById('dp-main');
   const participantsEl = document.getElementById('dp-participants');
-  const votesEl = document.getElementById('dp-votes');
+  const soldEl = document.getElementById('dp-sold');
   const clockEl = document.getElementById('dp-clock');
-  const urlEl = document.getElementById('dp-url');
   const hintEl = document.getElementById('dp-hint');
-  const leadersEl = document.getElementById('dp-leaders');
+  const swingEl = document.getElementById('dp-swing');
 
-  function serverNow() {
-    return Date.now() + clockOffset;
+  function renderClock() {
+    if (clockEl) {
+      clockEl.textContent = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    }
   }
 
   async function init() {
     try {
       const meta = await API.get('/api/meta');
+      window.__meta = meta;
+      window.__eventName = meta.event.name;
       document.querySelectorAll('[data-event-name]').forEach((el) => (el.textContent = meta.event.name));
       document.querySelectorAll('[data-event-tagline]').forEach((el) => (el.textContent = meta.event.tagline || ''));
-      document.title = `${meta.event.name} · Big Screen`;
-      const urlEl2 = document.getElementById('dp-url');
-      if (urlEl2) urlEl2.textContent = meta.join.joinUrl.replace(/^https?:\/\//, '');
-      window.__meta = meta;
+      document.title = `${meta.event.name} · Winners`;
+      const urlEl = document.getElementById('dp-url');
+      if (urlEl) urlEl.textContent = meta.join.joinUrl.replace(/^https?:\/\//, '');
     } catch {
-      /* retried by the poller below */
+      /* the poller below retries */
     }
 
     window.App.createLiveChannel({
@@ -40,266 +49,151 @@
       hiddenMultiplier: 2,
       onData: (payload) => {
         clockOffset = payload.serverTime - Date.now();
-        const prevSold = state && state.poll ? state.poll.results && state.poll.results.actualLakh : null;
-        state = payload;
-        render();
-        const nowSold = payload.poll && payload.poll.results ? payload.poll.results.actualLakh : null;
-        if (nowSold && nowSold !== prevSold) loadLeaders(true);
+        if (participantsEl) participantsEl.textContent = payload.stats.participants;
+        loadBoard(false);
       }
     });
 
-    setInterval(tick, 200);
+    renderClock();
     setInterval(renderClock, 1000);
-    loadLeaders(true);
-    setInterval(() => loadLeaders(false), 10000);
+    loadBoard(true);
+    setInterval(() => loadBoard(false), 8000);
   }
 
-  /* ------------------------------------------------------------------ */
-  /* 🏆 Overall leaders — who has guessed the most players accurately.   */
-  /*    Always on the big screen, under the live round.                  */
-  /* ------------------------------------------------------------------ */
+  /* ------------------------------ the board ------------------------------ */
 
-  let leaders = null;
-  let leadersAt = 0;
-  let lastLeaderKey = '';
+  let revealing = false;
 
-  async function loadLeaders(force) {
-    if (!leadersEl) return;
-    if (!force && Date.now() - leadersAt < 9000) return;
-    leadersAt = Date.now();
+  async function loadBoard(force) {
     try {
       const data = await API.get('/api/standings');
-      leaders = data && data.standings ? data : null;
-      renderLeaders();
-      if (force && !lastLeaderKey && leaders && leaders.rounds) confettiOnce();
+      const previous = board;
+      board = data && data.standings ? data : null;
+
+      /* while the ball is in the air nothing may repaint the board underneath it */
+      if (revealing) return;
+
+      if (!board || !board.rounds) {
+        renderEmpty();
+        return;
+      }
+
+      if (soldEl) soldEl.textContent = board.rounds;
+
+      const signature = board.standings
+        .slice(0, 3)
+        .map((s) => `${s.name}:${s.nearest}:${s.exact}`)
+        .join('|');
+
+      const isNew = Boolean(previous && signature !== lastSignature);
+      lastSignature = signature;
+
+      /* first paint on load, and every time a result changes → bat meets ball first */
+      if (force || isNew) {
+        playSwing(() => renderBoard());
+      } else {
+        renderBoard();
+      }
+      if (firstLoad) firstLoad = false;
     } catch {
-      /* the strip simply stays as it was */
+      /* leave whatever is on screen */
     }
   }
 
-  let celebrated = false;
-  function confettiOnce() {
-    if (celebrated) return;
-    celebrated = true;
+  function medalLabel(rank) {
+    return rank === 1 ? '1st' : rank === 2 ? '2nd' : '3rd';
   }
 
-  function renderLeaders() {
-    if (!leadersEl) return;
-    if (!leaders || !leaders.rounds || !leaders.standings.length) {
-      leadersEl.innerHTML = '';
-      leadersEl.classList.remove('is-on');
-      return;
-    }
-    const top = leaders.standings.slice(0, 3);
-    const key = top.map((s) => `${s.rank}:${s.name}:${s.nearest}`).join('|');
-    leadersEl.classList.add('is-on');
-    leadersEl.innerHTML = `
-      <div class="dp-leaders-head">
-        <span class="dp-leaders-title">Most accurate guesses</span>
-        <span class="dp-leaders-sub">${leaders.rounds} of ${leaders.players} players sold</span>
-      </div>
-      <div class="dp-leaders-row">
-        ${top
-          .map(
-            (s) => `
-          <div class="dp-leader rank-${s.rank}">
-            <div class="dp-leader-medal">${s.rank === 1 ? '1st' : s.rank === 2 ? '2nd' : '3rd'}</div>
-            <div class="dp-leader-body">
-              <div class="dp-leader-name">${escapeHtml(s.name)}</div>
-              <div class="dp-leader-score">
-                <strong>${s.nearest}</strong> accurate
-                ${s.exact ? `<span class="dp-leader-exact">${s.exact} exact</span>` : ''}
-              </div>
-            </div>
-          </div>`
-          )
-          .join('')}
-      </div>`;
-
-    /* a leader change is worth a small celebration on the big screen */
-    if (lastLeaderKey && key !== lastLeaderKey && lastLeaderKey.split(':')[0] !== key.split(':')[0]) {
-      window.App.confetti(1800);
-    }
-    lastLeaderKey = key;
-  }
-
-  function renderClock() {
-    if (clockEl) {
-      clockEl.textContent = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-    }
-  }
-
-  function animBars() {
-    requestAnimationFrame(() => {
-      mainEl.querySelectorAll('.dp-bar-fill, .dp-progress-fill').forEach((b) => {
-        b.style.width = `${b.dataset.w}%`;
-      });
-    });
-  }
-
-  function render() {
-    if (!state) return;
-    const p = state.poll;
-    participantsEl.textContent = state.stats.participants;
-    votesEl.textContent = p ? p.totalVotes : 0;
-    renderClock();
-
-    if (!p) {
-      renderIdle();
-      lastStatus = null;
-      return;
-    }
-
-    const statusChanged = p.id === lastPollId && lastStatus && lastStatus !== p.status;
-    lastStatus = p.status;
-    lastPollId = p.id;
-
-    if (p.status === 'closed') {
-      renderClosed(p);
-      if (statusChanged) window.App.confetti(2600);
-      return;
-    }
-    if (p.status === 'paused') {
-      renderPaused(p);
-      return;
-    }
-    renderActive(p);
-  }
-
-  function renderIdle() {
-    const meta = window.__meta;
+  function renderEmpty() {
+    if (soldEl) soldEl.textContent = '0';
     mainEl.className = 'dp-main';
     mainEl.innerHTML = `
       <div class="dp-idle fade-up">
-        <h1>${escapeHtml(state.event.name)}</h1>
-        <p>${escapeHtml(state.event.displayMessage || 'The next poll is about to begin. Open the link on your phone and get ready to vote!')}</p>
+        <h1>${escapeHtml(window.__eventName || 'Cricket Auction Live Polls')}</h1>
+        <p>No player has been sold yet. The winners board lights up the moment the first price is entered.</p>
         <div class="dp-idle-link">
           <div class="dp-idle-link-label">Open on your phone</div>
           <div class="dp-idle-link-url" id="dp-idle-url">—</div>
         </div>
         <div class="row" style="justify-content:center;gap:10px;flex-wrap:wrap">
-          <span class="pill pill-live"><span class="dot"></span>${state.stats.participants} participants ready</span>
-          <span class="pill pill-gold">Next poll soon</span>
+          <span class="pill pill-live"><span class="dot"></span>Guessing is open</span>
         </div>
       </div>`;
-    const idleUrl = document.getElementById('dp-idle-url');
-    if (idleUrl && window.__meta) {
-      idleUrl.textContent = window.__meta.join.joinUrl.replace(/^https?:\/\//, '');
+    try {
+      const meta = window.__meta;
+      const idleUrl = document.getElementById('dp-idle-url');
+      if (idleUrl && meta) idleUrl.textContent = meta.join.joinUrl.replace(/^https?:\/\//, '');
+    } catch {
+      /* cosmetic */
     }
-    hintEl.textContent = 'Waiting for the host to start a poll';
+    if (hintEl) hintEl.textContent = 'Waiting for the first sold price';
   }
 
-  function renderPaused(p) {
-    mainEl.className = 'dp-main';
+  function renderBoard() {
+    if (!board || !board.rounds) return renderEmpty();
+    const top = board.standings.slice(0, 3);
+    mainEl.className = 'dp-main dp-board-main';
+
     mainEl.innerHTML = `
-      <div class="dp-idle fade-up">
-        <span class="pill pill-paused" style="font-size:clamp(12px,1.1vw,18px);padding:8px 18px">⏸ Voting paused</span>
-        <h1 class="dp-question" style="font-size:clamp(24px,3.4vw,56px)">${escapeHtml(p.question)}</h1>
-        <p>The host has paused voting. Hang tight — we'll resume shortly.</p>
-        <div class="row" style="justify-content:center;gap:10px">
-          <span class="pill pill-ghost">${p.totalVotes} votes so far</span>
-          <span class="pill pill-ghost">${state.stats.participants} participants</span>
+      <div class="dp-board fade-up">
+        <div class="dp-board-head">
+          <div class="dp-board-title">Most accurate guesses</div>
+          <div class="dp-board-sub">${board.rounds} of ${board.players} players sold</div>
+        </div>
+
+        ${
+          top.length
+            ? ''
+            : `<div class="dp-board-empty">Sold prices are in, but nobody guessed yet — the board fills the moment the first accurate guess lands.</div>`
+        }
+        <div class="dp-podium">
+          ${top
+            .map(
+              (s) => `
+            <div class="dp-winner rank-${s.rank}">
+              <div class="dp-winner-badge">${medalLabel(s.rank)}</div>
+              <div class="dp-winner-name">${escapeHtml(s.name)}</div>
+              <div class="dp-winner-score">
+                <strong>${s.nearest}</strong>
+                <span>accurate ${s.nearest === 1 ? 'guess' : 'guesses'}</span>
+              </div>
+              ${s.exact ? `<div class="dp-winner-exact">${s.exact} spot on</div>` : '<div class="dp-winner-exact is-empty">&nbsp;</div>'}
+            </div>`
+            )
+            .join('')}
         </div>
       </div>`;
-    hintEl.textContent = 'Voting paused';
+
+    if (hintEl) hintEl.textContent = `${board.rounds} ${board.rounds === 1 ? 'player' : 'players'} sold`;
   }
 
-  function renderClosed(p) {
-    return renderBid(p, { closed: true });
-  }
+  /* --------------------------- the bat & ball ---------------------------- */
 
-  /* 🎯 Bid round: big player name + guesses so far, then the winners podium. */
-  function renderBid(p, { closed = false } = {}) {
-    const showResults = p.resultsVisible && p.results && p.results.kind === 'bid';
-    mainEl.className = 'dp-main split';
-    const medal = ['🥇', '🥈', '🥉'];
-
-    const podium = showResults
-      ? `<div class="dp-results">
-           <div class="dp-bid-sold">
-             <span class="mute-sm">SOLD FOR</span>
-             <strong>${escapeHtml(p.results.actualLabel || '—')}</strong>
-           </div>
-           ${p.results.winners
-             .map(
-               (w) => `
-             <div class="dp-result is-leader dp-bid-winner">
-               <div class="dp-result-top">
-                 <span class="dp-result-label">${medal[w.rank - 1] || '#' + w.rank} ${escapeHtml(w.name)}</span>
-                 <span class="dp-result-pct">${escapeHtml(w.guessLabel)}</span>
-               </div>
-               <div class="mute-sm" style="padding:4px 2px 8px">${escapeHtml(w.diffLabel)} ${w.direction === 'exact' ? '— spot on!' : w.direction}</div>
-             </div>`
-             )
-             .join('')}
-         </div>`
-      : `<div class="dp-panel dp-open">
-           <div class="dp-open-icon">🎯</div>
-           <div class="dp-open-title">Guess the price</div>
-           <p class="muted" style="font-size:clamp(12px,1.05vw,18px);max-width:34ch">
-             Drag the price bar on your phone. ${
-               closed ? 'The host will enter the sold price in a moment.' : 'Closest guess wins.'
-             }
-           </p>
-           <div class="dp-progress">
-             <div class="dp-progress-top"><span>${p.totalVotes} ${window.App.plural(p.totalVotes, 'guess', 'guesses')}</span><span>${closed ? 'closed' : 'live'}</span></div>
-             <div class="dp-progress-bar"><div class="dp-progress-fill" data-w="${closed ? 100 : 60}"></div></div>
-           </div>
-         </div>`;
-
-    mainEl.innerHTML = `
-      <div class="fade-up">
-        <div class="dp-row" style="margin-bottom:clamp(8px,1vw,18px)">
-          <span class="pill ${closed ? 'pill-closed' : 'pill-live'}" style="font-size:clamp(10px,.9vw,15px);padding:6px 14px">
-            ${closed ? 'ROUND CLOSED' : '<span class="dot"></span>LIVE BID ROUND'}
-          </span>
-          <span class="pill pill-ghost" style="font-size:clamp(10px,.9vw,15px);padding:6px 14px">${p.totalVotes} ${window.App.plural(p.totalVotes, 'guess', 'guesses')}</span>
-        </div>
-        ${p.playerName ? `<div class="dp-bid-player">${escapeHtml(p.playerName)}</div>` : ''}
-        <h1 class="dp-question" style="margin-top:clamp(6px,1vw,14px)">${escapeHtml(p.question)}</h1>
-        ${
-          !closed
-            ? `<div class="dp-row" style="margin-top:clamp(14px,1.8vw,30px)">
-                 <div class="dp-timer ${p.endsAt ? '' : 'hidden'}" id="dp-timer">
-                   <div class="dp-ring" id="dp-ring" style="--pct:100"></div>
-                   <span id="dp-timer-text">--:--</span>
-                 </div>
-                 <div class="dp-hint" style="text-align:left;margin-left:0;letter-spacing:0">Guess on your phone now</div>
-               </div>`
-            : ''
-        }
-      </div>
-      ${podium}`;
-    animBars();
-    hintEl.textContent = state.auction && state.auction.upNext
-      ? `Next up: ${state.auction.upNext}`
-      : showResults
-        ? 'Winners'
-        : closed
-          ? 'Waiting for the sold price'
-          : 'Bid round live';
-  }
-
-  function renderActive(p) {
-    return renderBid(p);
-  }
-
-  function tick() {
-    if (!state || !state.poll) return;
-    const p = state.poll;
-    const textEl = document.getElementById('dp-timer-text');
-    const ringEl = document.getElementById('dp-ring');
-    const timerEl = document.getElementById('dp-timer');
-    if (!textEl || !ringEl || !timerEl) return;
-    if (!p.endsAt) {
-      textEl.textContent = 'No limit';
+  /**
+   * Plays the swing, then hands control back so the winners fade in.
+   * 2000 ms total — long enough to feel like a moment, short enough not to stall the room.
+   */
+  function playSwing(after) {
+    if (!swingEl) {
+      after();
       return;
     }
-    const remaining = Math.max(0, p.endsAt - serverNow());
-    textEl.textContent = formatClock(remaining);
-    const total = Math.max(1, p.endsAt - (p.startedAt || p.endsAt - p.timerSeconds * 1000));
-    ringEl.style.setProperty('--pct', ((remaining / total) * 100).toFixed(1));
-    timerEl.classList.toggle('is-urgent', remaining <= 10_000);
+    clearTimeout(revealTimer);
+    revealing = true;
+    // hide the board while the ball is in the air
+    const current = mainEl.querySelector('.dp-board');
+    if (current) current.classList.add('is-hidden');
+
+    swingEl.classList.remove('is-playing');
+    void swingEl.offsetWidth; // restart the keyframes
+    swingEl.classList.add('is-playing');
+
+    revealTimer = setTimeout(() => {
+      swingEl.classList.remove('is-playing');
+      revealing = false;
+      after();
+      window.App.confetti(1800);
+    }, 2000);
   }
 
   /* ---------------------------- full screen ---------------------------- */
@@ -315,6 +209,7 @@
   fsBtn?.addEventListener('click', toggleFullscreen);
   document.addEventListener('keydown', (e) => {
     if (e.key === 'f' || e.key === 'F') toggleFullscreen();
+    if (e.key === 'r' || e.key === 'R') playSwing(() => renderBoard());
     document.body.classList.add('show-controls');
     setTimeout(() => document.body.classList.remove('show-controls'), 2600);
   });
@@ -324,10 +219,6 @@
     window.__ct = setTimeout(() => document.body.classList.remove('show-controls'), 2600);
   });
 
-  setInterval(renderClock, 1000);
   renderClock();
   init();
-  setInterval(() => {
-    if (!state) API.get('/api/state').then((s) => { state = s; render(); }).catch(() => {});
-  }, 8000);
 })();
