@@ -98,6 +98,27 @@ function pct(list, p) {
   const dashboardShown = Date.now() - tLogin;
   ok(`admin dashboard usable under ${PAGE_BUDGET} ms`, dashboardShown < PAGE_BUDGET, `${dashboardShown} ms`);
 
+  /* ---------------- 3. reopening the phone with a hostile network ---------------- */
+  /* The phone keeps the last state it saw. On a re-open the round must be on screen from that
+     snapshot in one frame, even if every API call takes 1.5 s. This is the "why is the name
+     missing for two seconds" complaint, measured. */
+  const slow = await context.newPage();
+  await slow.route('**/api/**', async (route) => {
+    await new Promise((r) => setTimeout(r, 1500));
+    await route.continue();
+  });
+  const tSnap = Date.now();
+  await slow.goto(`${BASE}/poll`, { waitUntil: 'domcontentloaded' }).catch(() => {});
+  /* the phone marks itself the moment it has painted the remembered state */
+  const painted = await slow
+    .waitForSelector('body.from-snapshot', { timeout: 8000 })
+    .then(() => true)
+    .catch(() => false);
+  const snapMs = Date.now() - tSnap;
+  /* only meaningful when the phone had a snapshot to paint (it does, it just used the page) */
+  ok('re-opening the phone paints from its snapshot before the network answers', painted && snapMs < 1200, `${snapMs} ms`);
+  await slow.close();
+
   console.log(`\n  API calls made by the poll screen: ${apiCalls.length ? apiCalls.join(', ') : 'none'}`);
 
   await browser.close();

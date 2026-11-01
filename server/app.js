@@ -5,6 +5,7 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 
 const { ensureInit } = require('./db');
+const perf = require('./perf');
 const auth = require('./auth');
 const publicRoutes = require('./routes/public');
 const adminRoutes = require('./routes/admin');
@@ -217,7 +218,7 @@ app.get('/api/diag', async (req, res) => {
 });
 
 /* Everything below goes through one identity lookup + schema bootstrap */
-app.use('/api', ensureInit, auth.attachIdentity);
+app.use('/api', perf.middleware, ensureInit, auth.attachIdentity);
 app.use('/api', publicRoutes);
 app.use('/api/admin', adminRoutes);
 
@@ -241,7 +242,8 @@ const PAGES = {
   '/admin/participants': 'admin-participants.html',
   '/admin/history': 'admin-history.html',
   '/admin/players': 'admin-players.html',
-  '/admin/results': 'admin-results.html'
+  '/admin/results': 'admin-results.html',
+  '/admin/speed': 'admin-speed.html'
 };
 for (const [route, file] of Object.entries(PAGES)) {
   app.get(route, (req, res) => res.sendFile(path.join(PUBLIC_DIR, file)));

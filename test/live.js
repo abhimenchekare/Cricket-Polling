@@ -120,7 +120,10 @@ async function json(url, options = {}) {
   /* ---------------- how are the pages listening? ---------------- */
   const mode = await audience.evaluate(() => (window.__liveMode || 'unknown'));
   console.log(`\n  audience listening mode: ${mode}`);
-  ok('audience page uses the push stream', mode !== 'polling', mode);
+  /* v4.2.0 — on Vercel the phone deliberately polls (invocation cap), so the assertion is
+     "the phone is live" rather than "the phone is streaming". Either way the round must land
+     inside the timing budget measured below. */
+  ok('audience phone is live (stream, or poll on Vercel)', mode === 'stream' || mode === 'polling', mode);
 
   /* ---------------- THE measurement: press Start → on screen ---------------- */
   const t0 = Date.now();

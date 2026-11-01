@@ -12,7 +12,7 @@ A complete live polling website for your office cricket auction, built to run **
 
 ---
 
-## What this app does (v4.1.0 — auction list + SHOUT)
+## What this app does (v4.2.0 — fast on the deployed site, not just on my laptop)
 
 An office-cricket-auction companion for the audience's phones.
 
@@ -635,6 +635,85 @@ guess, difference, direction, timestamp) plus the guess distribution.
 Every price is an integer number of lakh (`100` = 1.00 Cr), so "closest" is exact integer arithmetic —
 no floating-point rounding can ever make two different guesses look equal.
 
+---
+
+## 4h. v4.2.0 — why the *deployed* site was still slow (and what changed)
+
+v4.1.0 made SHOUT and Lock-in fast on a laptop, but you were still waiting **2–3 seconds on
+the live Vercel URL**. That gap was environmental, and four things caused it. All four are now
+addressed, and — more importantly — **the deployment can now measure itself**.
+
+### 1. Phones were holding a streaming connection open (the big one)
+
+The push stream (SSE) is wonderful on a laptop, but on Vercel every open stream **occupies a
+concurrent function invocation for its whole lifetime** (up to 45 s here). Vercel Hobby allows
+only a handful of concurrent invocations, so with 20–70 phones holding streams, the one request
+that actually mattered — your SHOUT — was **queued behind them**. That is what "SHOUT takes 2–3
+seconds" looked like from the outside.
+
+On Vercel, phones now **poll instead of streaming**:
+
+| Screen | How it stays live | Why |
+| --- | --- | --- |
+| Phone | HTTP poll: **900 ms** while a round is open, **3 s** when quiet, and it stays on the fast cadence for a minute after any change | each request lasts ~100 ms and instantly frees its slot |
+| Projector | SSE stream | there is exactly one of them |
+| Admin panel | SSE stream | one or two of them |
+
+The server tells each page which to use (`GET /api/meta` → `polling.transport`), so it is not
+baked into the JS. If you move to a host without an invocation cap, set `LIVE_TRANSPORT=stream`
+and phones go back to streams.
+
+### 2. Cold starts were running nine queries before doing any work
+
+When a function wakes up, the app initialises the database first. That used to be **nine
+sequential round trips** (a probe plus seven settings inserts). It is now **two**: one probe that
+returns the schema version and the admin count, and one `unnest(...)` insert that seeds every
+setting in a single statement.
+
+### 3. Every audience request did a housekeeping sweep
+
+`sweepExpiredPolls()` ran on each `/api/state` — dozens of times a second across the audience.
+It now runs **at most once every 1.5 s per process**, single-flight, and its activity log is
+fire-and-forget.
+
+### 4. Region mismatch (the one only *you* can fix, and the app now tells you)
+
+If your Vercel functions run in one region and your Neon database in another, **every single
+query pays a cross-region round trip**. The app now reads the region out of your Neon hostname
+(`…-pooler.ap-south-1.aws.neon.tech`), compares it with the function's region, and says so.
+
+---
+
+## 4i. 🩺 Speed check — run this on the deployment, not on my word
+
+Open **`/admin/speed`** from the admin sidebar (or the **Run speed check** button on the panel).
+It measures, live, on the exact deployment your audience is using:
+
+- **Database round trip** and the **audience screen read** (`/api/state`)
+- **Function region** vs **database region**, with the one-line fix when they differ
+- Whether `DATABASE_URL` is the **pooled** (`-pooler`) Neon string
+- **Phone transport** and its cadence
+- **Slowest endpoints** this process has served (p50 / p95 / worst)
+- **SHOUT and Lock in, step by step** — how many milliseconds each statement inside the button took
+- A plain-English **verdict** at the bottom
+
+How to use it:
+
+1. Deploy 4.2.0, open `/admin/speed`, press **Run speed check**.
+2. Read the verdict. If it says the regions differ, add the suggested line to `vercel.json`:
+   ```json
+   { "regions": ["bom1"] }
+   ```
+   (`bom1` = Mumbai, `iad1` = US East, `fra1` = Frankfurt, `sin1` = Singapore, `syd1` = Sydney,
+   `gru1` = São Paulo.) Then **redeploy** — region changes need a new deployment.
+3. Press SHOUT once, then run the check again: the **SHOUT and Lock in, step by step** panel
+   shows every statement of that press. A healthy press on a co-located Neon is 4 queries ≈ 20 ms.
+4. If a card is still red, the verdict under it names the fix.
+
+A raw version of the same data is at `GET /api/admin/diag` (admin token required).
+
+---
+
 ## 5. Pages
 
 | Page | URL |
@@ -912,7 +991,7 @@ npm run test:slider                # nobody else's vote moves your slider + the 
 npm run test:latency               # SHOUT <2 s and Lock in <1.5 s with a simulated Neon latency
 ```
 
-**Current results (local, v4.1.0), all with zero failures — 18 suites, 561 checks:**
+**Current results (v4.2.0, phones polled + 40 ms simulated Neon latency), 18 suites, 556 checks, 0 failures:**
 
 | Suite | Checks | What it proves |
 | --- | --- | --- |
@@ -926,13 +1005,13 @@ npm run test:latency               # SHOUT <2 s and Lock in <1.5 s with a simula
 | **`ranking`** | **31** | the scoring rule itself: exact bids win, nobody-exact, 5-way exact, right-bid-beats-near-miss, ties (no DB, no browser) |
 | **`phone-fit`** | **25** | one-screen guess card, greeting + counters kept, no next-player hint, duck waiting screen |
 | **`slider`** | **22** |
-| **`latency`** | **15** | SHOUT → phone 0.44 s, Lock in 0.27 s at 40 ms/query; the board never rebuilds on incoming votes | another person's vote never moves your slider (phone **and** admin), no name/price/rank after a round, the duck bats then gets bowled |
+| **`latency`** | **15** | SHOUT → phone 0.62 s avg (worst 0.71 s), SHOUT POST 0.29 s, Lock in 0.27 s at 40 ms/query, phones polling; the board never rebuilds on incoming votes |
 | **`display`** | **29** | big screen: bat-and-ball reveal, then 1st/2nd/3rd by right bids, closest calls as the small line, fits 1920×1080 |
 | `ui-rapid` | 18 | 10s…2 min presets, remembered across reloads, used by the next SHOUT |
 | `ui-session` | 30 | admin sign-in/session/logout |
-| `live` | 10 | start→phone 241 ms, vote→second phone 679 ms, price→phone cleared 1346 ms, fallback polling |
-| `routes` | 21 | `/admin/players` and every other route on a real deployment |
-| `config` | 37 | Vercel rewrites, serverless layout, no Socket.IO / QR / local-file DB |
+| `live` | 10 | start→phone 811 ms, second phone 1229 ms, vote→phone 838 ms, sold price clears the phone 1136 ms — measured with phones polling |
+| `routes` | 25 | every page incl. `/admin/speed`, the advertised phone transport, and that `/api/admin/diag` is admin-only |
+| `config` | 38 | Vercel rewrites, serverless layout, no Socket.IO / QR / local-file DB |
 | `perf` | 3 | `/api/state` p95 32 ms, poll screen usable in 78 ms |
 
 Screenshots of the browser runs land in `test/screenshots/` (`sh1-auction-list.png`,
@@ -942,7 +1021,24 @@ Screenshots of the browser runs land in `test/screenshots/` (`sh1-auction-list.p
 
 ## 7. Staying comfortably inside free tiers
 
-Each phone does about **1 request every 3 seconds** while a poll is live (~20 requests/second with 60 people voting at once). Vercel's Hobby plan allows far more than an evening of polling, and the 10-second polls you're planning keep the load tiny.
+Since v4.2.0 a phone makes about **1 request per second while a round is open** and 1 every 3 s
+when the room is quiet — never an open connection. The arithmetic for a realistic event:
+
+| | Per phone | 70 phones, 3-hour auction |
+| --- | --- | --- |
+| Requests | ~1/s live, 1/3 s idle | ≈ **350–450 k invocations** |
+| Response size | ~5 KB `/api/state` | ≈ **2 GB** egress |
+| Function time | ~120 ms per request | ≈ **12 GB-hours** of memory |
+
+Hobby includes **1 M invocations** and **100 GB-hours** per month, so one auction sits at roughly
+40 % of the invocation allowance and a small fraction of everything else. Two things keep it there:
+
+- **Jitter** — every phone waits 0.85–1.15× its interval, so seventy phones never hit the server
+  in the same instant.
+- **Background tabs slow down 4×**, and the cadence drops to 3 s automatically once nothing has
+  changed for a minute. The TV/projector keeps its single stream.
+
+If you want to spend less, raise `PHONE_POLL_ACTIVE_MS` (default 900) — 1200 still feels instant.
 
 If you want to be extra conservative, add env vars:
 

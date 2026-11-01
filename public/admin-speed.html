@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Speed check · Auction Control Room</title>
+<link rel="stylesheet" href="/css/theme.css?v=4.2.0" />
+<style>
+  .speed-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-top: 14px; }
+  .speed-card { border-radius: 14px; border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.03); padding: 14px 16px; }
+  .speed-num { font: 900 clamp(24px, 3vw, 34px)/1 system-ui; letter-spacing: -0.5px; }
+  .speed-num.good { color: #35d07f; }
+  .speed-num.ok { color: #ffd166; }
+  .speed-num.bad { color: #ff6b6b; }
+  .speed-label { font: 700 11px/1 system-ui; letter-spacing: .12em; text-transform: uppercase; color: #8fa1bd; margin-bottom: 8px; }
+  .verdict { margin: 8px 0 0; padding-left: 18px; }
+  .verdict li { margin: 6px 0; line-height: 1.45; }
+  table.speed-tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; margin-top: 10px; }
+  table.speed-tbl th, table.speed-tbl td { text-align: left; padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.07); }
+  table.speed-tbl th { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: #8fa1bd; }
+  .pill-mini { display: inline-block; border-radius: 999px; padding: 3px 9px; font: 800 11px/1.4 system-ui; }
+  .pill-mini.good { background: rgba(53,208,127,.16); color: #35d07f; }
+  .pill-mini.ok { background: rgba(255,209,102,.16); color: #ffd166; }
+  .pill-mini.bad { background: rgba(255,107,107,.16); color: #ff6b6b; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">🏏</div>
+      <div>
+        <div class="brand-name" data-event-name>Auction Control Room</div>
+        <div class="brand-sub">Speed check · where the seconds go</div>
+      </div>
+    </div>
+    <div class="row" style="gap:8px">
+      <a class="btn btn-ghost btn-sm" href="/admin">← Dashboard</a>
+      <button class="btn btn-gold btn-sm" id="run">Run speed check</button>
+    </div>
+  </header>
+
+  <section class="card" style="margin-top:16px">
+    <div class="card-head">
+      <div>
+        <div class="eyebrow">Live measurement</div>
+        <div class="card-title" style="margin-top:4px">How fast is this deployment right now?</div>
+      </div>
+      <span class="pill pill-ghost" id="stamp">—</span>
+    </div>
+    <p class="mute-sm" style="margin:10px 0 0">
+      Every number below is measured on <strong>this</strong> deployment — the same functions and the
+      same database the phones are using. Run it before the auction; if anything is red, the fix is
+      written underneath.
+    </p>
+
+    <div class="speed-grid" id="cards"></div>
+    <div id="verdict" style="margin-top:16px"></div>
+  </section>
+
+  <section class="card" style="margin-top:16px">
+    <div class="card-head"><div>
+      <div class="eyebrow">The calls the screens make</div>
+      <div class="card-title" style="margin-top:4px">Slowest endpoints (this process)</div>
+    </div></div>
+    <div id="routes" class="mute-sm" style="margin-top:10px">Run the check to fill this in.</div>
+  </section>
+
+  <section class="card" style="margin-top:16px">
+    <div class="card-head"><div>
+      <div class="eyebrow">The two buttons that matter</div>
+      <div class="card-title" style="margin-top:4px">SHOUT and Lock in, step by step</div>
+    </div></div>
+    <div id="steps" class="mute-sm" style="margin-top:10px">Nothing measured yet — press SHOUT once in the dashboard.</div>
+  </section>
+</div>
+
+<script src="/js/app.js?v=4.2.0"></script>
+<script>
+(function () {
+  'use strict';
+  const { API, escapeHtml, toast } = window.App;
+  const cardsEl = document.getElementById('cards');
+  const verdictEl = document.getElementById('verdict');
+  const routesEl = document.getElementById('routes');
+  const stepsEl = document.getElementById('steps');
+  const stampEl = document.getElementById('stamp');
+
+  const tone = (v, good, ok) => (v <= good ? 'good' : v <= ok ? 'ok' : 'bad');
+
+  function card(label, value, unit, t, hint) {
+    return `<div class="speed-card">
+      <div class="speed-label">${label}</div>
+      <div class="speed-num ${t}">${value}<span style="font-size:.45em;font-weight:700;opacity:.6"> ${unit}</span></div>
+      <div class="mute-sm" style="margin-top:8px">${hint}</div>
+    </div>`;
+  }
+
+  async function run() {
+    const runBtn = document.getElementById('run');
+    runBtn.disabled = true;
+    runBtn.innerHTML = '<span class="spinner"></span><span>Measuring…</span>';
+    try {
+      const d = await API.get('/api/admin/diag');
+      const rtt = d.database.avgRoundTripMs;
+      const stateMs = d.database.stateQueryMs;
+      const cold = d.runtime.cold;
+
+      cardsEl.innerHTML = [
+        card('Database round trip', rtt, 'ms', tone(rtt, 40, 120), 'How long one query takes to reach Neon and come back.'),
+        card('Audience screen read', stateMs == null ? '—' : stateMs, 'ms', tone(stateMs || 0, 200, 500), 'One /api/state — the heartbeat of every phone.'),
+        card('Function region', d.runtime.region, '', '', `Node ${escapeHtml(d.runtime.node)} · ${cold ? 'cold start' : 'warm'} · up ${d.runtime.uptimeSeconds}s`),
+        card(
+          'Pooled connection',
+          !d.database.host || !/\.neon\.tech$/.test(d.database.host)
+            ? 'n/a'
+            : d.database.pooled
+              ? 'yes'
+              : 'no',
+          '',
+          !d.database.host || !/\.neon\.tech$/.test(d.database.host)
+            ? ''
+            : d.database.pooled
+              ? 'good'
+              : 'bad',
+          'The pooled Neon string avoids a fresh TLS handshake per request. Local Postgres has neither.',
+        ),
+        card(
+          'Database region',
+          d.database.neonRegion || '—',
+          '',
+          d.database.regionMismatch ? 'bad' : d.database.neonRegion ? 'good' : '',
+          d.database.regionMismatch
+            ? `Function ${escapeHtml(d.database.functionRegion)} → add "regions": ["${escapeHtml(d.database.suggestedVercelRegion)}"] to vercel.json`
+            : 'Should match the function region above.',
+        ),
+        card(
+          'Phone transport',
+          d.transport && d.transport.phone ? d.transport.phone : '—',
+          '',
+          d.transport && d.transport.phone === 'poll' ? 'good' : '',
+          d.transport && d.transport.phone === 'poll'
+            ? `${d.transport.phoneActiveMs} ms while a round is open · ${d.transport.phoneIdleMs} ms when quiet`
+            : 'Server-Sent Events — only use this on a host without an invocation cap.',
+        )
+      ].join('');
+
+      verdictEl.innerHTML = `
+        <div class="card-title" style="font-size:15px">Verdict</div>
+        <ul class="verdict">${d.verdict.map((v) => `<li>${escapeHtml(v)}</li>`).join('')}</ul>
+        <p class="mute-sm" style="margin-top:10px">Database host: <strong>${escapeHtml(d.database.host || 'unknown')}</strong></p>`;
+
+      routesEl.innerHTML = d.routes.length
+        ? `<table class="speed-tbl"><thead><tr><th>Endpoint</th><th>Calls</th><th>p50</th><th>p95</th><th>Worst</th></tr></thead><tbody>
+            ${d.routes
+              .map((r) => {
+                const t = tone(r.p95, 200, 800);
+                return `<tr><td>${escapeHtml(r.route)}</td><td>${r.calls}</td><td>${r.p50} ms</td>
+                  <td><span class="pill-mini ${t}">${r.p95} ms</span></td><td>${r.max} ms</td></tr>`;
+              })
+              .join('')}
+          </tbody></table>`
+        : '<div class="mute-sm">No API calls recorded in this process yet.</div>';
+
+      stepsEl.innerHTML = d.steps.length
+        ? `<table class="speed-tbl"><thead><tr><th>Step</th><th>Took</th><th>When</th></tr></thead><tbody>
+            ${d.steps
+              .slice()
+              .reverse()
+              .map((s) => `<tr><td>${escapeHtml(s.name)}${s.extra ? ' <span class="mute-sm">' + escapeHtml(s.extra) + '</span>' : ''}</td>
+                <td><span class="pill-mini ${tone(s.ms, 80, 400)}">${s.ms} ms</span></td>
+                <td class="mute-sm">${new Date(s.at).toLocaleTimeString()}</td></tr>`)
+              .join('')}
+          </tbody></table>`
+        : '<div class="mute-sm">Nothing measured yet — press SHOUT once in the dashboard, then run this again.</div>';
+
+      stampEl.textContent = new Date(d.when).toLocaleString();
+    } catch (err) {
+      toast(err.message || 'Could not measure', 'err');
+    } finally {
+      runBtn.disabled = false;
+      runBtn.textContent = 'Run speed check';
+    }
+  }
+
+  document.getElementById('run').addEventListener('click', run);
+  run();
+})();
+</script>
+</body>
+</html>

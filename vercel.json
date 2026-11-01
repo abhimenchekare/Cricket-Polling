@@ -41,6 +41,10 @@
     {
       "source": "/admin/results",
       "destination": "/admin-results"
+    },
+    {
+      "source": "/admin/speed",
+      "destination": "/admin-speed"
     }
   ],
   "headers": [

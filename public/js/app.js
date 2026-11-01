@@ -403,6 +403,7 @@
       onError,
       activeInterval,
       idleInterval,
+      recentMs = 0,
       immediate = true,
       allowStream = true
     } = options;
@@ -438,6 +439,7 @@
         onError,
         activeInterval,
         idleInterval,
+        recentMs,
         immediate
       });
     };
@@ -536,6 +538,7 @@
       onError,
       activeInterval = 1200, // a poll is live — short enough to feel instant
       idleInterval = 3000, // nothing happening
+      recentMs = 0, // stay on the fast cadence this long after the last change (0 = off)
       hiddenMultiplier = 4,
       immediate = true
     } = options;
@@ -547,10 +550,15 @@
     let failures = 0;
     let paused = document.hidden;
     let forceNext = true;
+    let lastChangeAt = Date.now();
 
     function intervalFor(data) {
       const live = data && data.poll && (data.poll.status === 'active' || data.poll.status === 'paused');
-      let base = live ? activeInterval : idleInterval;
+      /* recentMs keeps the fast cadence during a burst of activity: between rounds there is no
+         live poll, but the next SHOUT may land any moment, so dropping to the idle cadence there
+         is exactly when the phone would look slow. */
+      const recent = recentMs > 0 && Date.now() - lastChangeAt < recentMs;
+      let base = live || recent ? activeInterval : idleInterval;
       if (failures > 0) base = Math.min(base * 2 ** failures, 15000);
       if (paused) base *= hiddenMultiplier;
       // ±15% jitter so dozens of phones never hit the server in the same instant
@@ -572,6 +580,7 @@
         onStatus && onStatus('online');
         const version = data && data.version ? data.version : null;
         if (forceNext || version === null || version !== lastVersion) {
+          if (!forceNext) lastChangeAt = Date.now();
           forceNext = false;
           lastVersion = version;
           onData && onData(data);

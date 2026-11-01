@@ -566,9 +566,32 @@ npm run dev                        # run locally at http://localhost:4000
 
 ---
 
+## The 3-minute performance check (v4.2.0) — do this after deploying
+
+The app measures itself on the deployment, so you never have to guess again.
+
+1. Deploy this version (a redeploy is **required** — env and region changes only apply to new
+   deployments).
+2. Sign in to the admin panel and click **Speed check** in the left sidebar
+   (`https://<project>.vercel.app/admin/speed`).
+3. Press **Run speed check**. Read the cards and then the **Verdict**:
+   - **Database round trip** — one query to Neon. Under 40 ms is excellent, 60–120 ms is fine,
+     above 120 ms means the two are in different regions.
+   - **Function region** vs **Database region** — if they differ, the verdict tells you the exact
+     line to add, e.g. `"regions": ["bom1"]` for Mumbai. Add it to `vercel.json`, commit, redeploy.
+   - **Pooled connection** — should be **yes** (the Neon string ending in `-pooler`).
+   - **Phone transport** — should be **poll** on Vercel. That is what keeps SHOUT instant.
+4. In the admin panel press **SHOUT** once, then run the check again. The
+   **SHOUT and Lock in, step by step** panel now lists every statement inside that press with its
+   own timing — that is your proof, measured on the live site.
+
+If you want the raw numbers instead of the cards: `GET /api/admin/diag` with an admin token.
+
+---
+
 ## Free-tier reality check
 
-- **Vercel Hobby:** this app makes one small JSON request per phone every ~3 s while a poll is live (tabs in the background drop to ~1 request/minute). An evening of polling with 50–100 phones is far inside the free allowance.
+- **Vercel Hobby:** since 4.2.0 each phone makes one small JSON request per **0.9 s while a round is open**, one per 3 s when quiet, and never holds an open connection (background tabs slow down 4×). A 3-hour auction with 70 phones is ≈ 350–450 k invocations and ~2 GB of egress — around 40 % of the monthly 1 M invocation allowance, and it is exactly what keeps SHOUT instant on the free plan.
 - **Neon Free:** 1 GB storage and a monthly compute allowance — a single evening uses a tiny fraction (the whole database is a few hundred KB).
 - Turn the site off afterwards by deleting the Vercel project, or keep it for the next event and just run `npm run reset -- --yes`.
 - Vercel's Hobby plan is aimed at personal/non-commercial use; a one-off internal office event is fine, but check with your company if it's officially sponsored.

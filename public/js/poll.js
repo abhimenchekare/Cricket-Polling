@@ -73,7 +73,41 @@
   // Tell the phone when a newer deployment is live (banner, never an auto-reload).
   if (window.App.watchForNewBuild) window.App.watchForNewBuild({ intervalMs: 90000 });
 
+  /* Paint the last state we saw on this phone immediately — before /api/meta or /api/state has
+     even answered. On a slow network the round is on screen in one frame instead of after a
+     two-second wait, and the live channel then corrects anything that changed. */
+  const SNAP_KEY = 'cp_state_snapshot';
+
+  function paintFromSnapshot() {
+    try {
+      const raw = localStorage.getItem(SNAP_KEY);
+      if (!raw) return false;
+      const payload = JSON.parse(raw);
+      if (!payload || !payload.state || Date.now() - Number(payload.savedAt || 0) > 12 * 60 * 60 * 1000) return false;
+      if (payload.meta) meta = payload.meta;
+      /* Reuse the normal path so the snapshot is rendered exactly like a live payload. */
+      applyState(payload.state);
+      return true;
+    } catch (err) {
+      if (typeof console !== 'undefined') console.info('[snapshot] could not paint', err && err.message);
+      return false;
+    }
+  }
+
+  function saveSnapshot(payload) {
+    try {
+      localStorage.setItem(
+        SNAP_KEY,
+        JSON.stringify({ state: payload, meta, savedAt: Date.now() })
+      );
+    } catch {
+      /* private mode — the in-memory render is enough */
+    }
+  }
+
   async function init() {
+    const painted = paintFromSnapshot();
+    if (painted) document.body.classList.add('from-snapshot');
     try {
       meta = await API.get('/api/meta');
       els.eventName.forEach((el) => (el.textContent = meta.event.name));
@@ -107,10 +141,23 @@
   let realtime = null;
 
   function startRealtime() {
+    /* On Vercel the phone polls instead of holding a stream — see server/routes/public.js.
+       1.2 s while a round is open, 4 s when it is not: fast enough that the player's name is on
+       screen before anyone can notice, without keeping a concurrency slot open per phone. */
+    const transport = (meta && meta.polling && meta.polling.transport) || {};
+    const phonePolls = transport.phone === 'poll';
     realtime = window.App.createLiveChannel({
       url: '/api/state',
-      activeInterval: (meta && meta.polling && meta.polling.activeMs) || 3000,
-      idleInterval: (meta && meta.polling && meta.polling.idleMs) || 8000,
+      allowStream: !phonePolls,
+      activeInterval: phonePolls
+        ? transport.phoneActiveMs || 900
+        : (meta && meta.polling && meta.polling.activeMs) || 3000,
+      idleInterval: phonePolls
+        ? transport.phoneIdleMs || 3000
+        : (meta && meta.polling && meta.polling.idleMs) || 8000,
+      /* keep the fast cadence for a minute after anything changes, so the gap between rounds
+         (when the next SHOUT arrives) is never polled slowly */
+      recentMs: phonePolls ? transport.phoneRecentMs || 60000 : 0,
       onData: (payload) => {
         setConn(true);
         applyState(payload);
@@ -176,6 +223,7 @@
     }
     renderStats();
     tickTimer();
+    saveSnapshot(payload);
     if (closedNow) {
       haptic(60);
       toast('Voting closed for this poll', 'info');

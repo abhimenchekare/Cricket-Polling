@@ -188,12 +188,22 @@ function init() {
   if (initPromise) return initPromise;
 
   initPromise = (async () => {
+    const bootAt = Date.now();
     // 1) Schema — skipped on later cold starts via a version marker (keeps cold starts fast)
-    const CURRENT_SCHEMA_VERSION = '5';
+    const CURRENT_SCHEMA_VERSION = '6';
     let schemaReady = false;
+    let adminCount = 0;
     try {
-      const marker = await pool.query("SELECT value FROM settings WHERE key = 'schema_version' LIMIT 1");
-      schemaReady = Boolean(marker.rows[0] && marker.rows[0].value === CURRENT_SCHEMA_VERSION);
+      /* One round trip for both questions. On Neon every statement costs 40-80 ms, and this runs
+         on EVERY cold serverless start — nine round trips before the first real query was most of
+         the 2-3 s the room was feeling. */
+      const probe = await pool.query(
+        `SELECT (SELECT value FROM settings WHERE key = 'schema_version' LIMIT 1) AS version,
+                (SELECT COUNT(*)::int FROM admins) AS admins`
+      );
+      const row = probe.rows[0] || {};
+      schemaReady = row.version === CURRENT_SCHEMA_VERSION;
+      adminCount = Number(row.admins || 0);
     } catch {
       schemaReady = false; // table does not exist yet
     }
@@ -208,16 +218,17 @@ function init() {
       );
     }
 
-    // 2) Seed — always checked (a few cheap queries) so a wiped database
-    //    is repaired automatically instead of silently staying empty.
-    for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
-      await pool.query(
-        'INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING',
-        [key, String(value)]
-      );
-    }
+    /* 2) Seed — one statement for every setting (was seven). Repairs a wiped database without
+       making every cold start pay for it. */
+    const keys = Object.keys(DEFAULT_SETTINGS);
+    const vals = keys.map((k) => String(DEFAULT_SETTINGS[k]));
+    await pool.query(
+      `INSERT INTO settings (key, value)
+       SELECT * FROM unnest($1::text[], $2::text[])
+       ON CONFLICT (key) DO NOTHING`,
+      [keys, vals]
+    );
 
-    const adminCount = Number(await scalar('SELECT COUNT(*)::int AS c FROM admins'));
     if (adminCount === 0) {
       const bcrypt = require('bcryptjs');
       const username = process.env.ADMIN_USERNAME || 'admin';

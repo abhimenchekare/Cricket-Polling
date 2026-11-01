@@ -298,9 +298,19 @@ async function getOnlineCount() {
 /* read or write first closes polls whose countdown has finished.      */
 /* ------------------------------------------------------------------ */
 
-async function sweepExpiredPolls() {
+let lastSweepAt = 0;
+let sweepInFlight = null;
+
+async function sweepExpiredPolls(force = false) {
   const now = Date.now();
-  const expired = await q(
+  /* The audience screen asks for the state every couple of seconds on every phone. Running an
+     UPDATE on each of those reads is pure overhead — nothing can expire between two calls 300 ms
+     apart, and the state read itself already normalises an expired countdown. */
+  if (!force && now - lastSweepAt < 1500) return false;
+  if (sweepInFlight) return sweepInFlight;
+  lastSweepAt = now;
+  sweepInFlight = (async () => {
+    const expired = await q(
     `UPDATE polls
         SET status = 'closed', closed_at = $1, ends_at = COALESCE(ends_at, $1),
             remaining_ms = 0, updated_at = $1, revision = revision + 1
@@ -308,11 +318,16 @@ async function sweepExpiredPolls() {
       RETURNING id, question`,
     [now]
   );
-  for (const p of expired) {
-    await logActivity('poll.auto_closed', `Poll #${p.id} closed when the timer ended`, 'system');
-    console.log(`[timer] auto-closed poll #${p.id}`);
-  }
-  return expired.length > 0;
+    for (const p of expired) {
+      /* fire and forget — the poll is already closed, the log line must not delay the response */
+      logActivity('poll.auto_closed', `Poll #${p.id} closed when the timer ended`, 'system').catch(() => {});
+      console.log(`[timer] auto-closed poll #${p.id}`);
+    }
+    return expired.length > 0;
+  })().finally(() => {
+    sweepInFlight = null;
+  });
+  return sweepInFlight;
 }
 
 /* ------------------------------------------------------------------ */

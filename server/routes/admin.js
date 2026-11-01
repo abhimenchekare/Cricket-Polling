@@ -5,6 +5,7 @@ const { q, one, logActivity } = require('../db');
 const { allSettings, setSetting } = require('../settings');
 const auth = require('../auth');
 const state = require('../state');
+const perf = require('../perf');
 const config = require('../config');
 const ladder = require('../bidladder');
 const auction = require('../auction');
@@ -1005,7 +1006,7 @@ router.post('/shout', async (req, res, next) => {
       }
     }
 
-    const next5 = await auction.queue(1);
+    const next5 = await perf.timed('shout: pick next player', () => auction.queue(1));
     const player = next5[0];
     if (!player) {
       return res.status(409).json({
@@ -1022,7 +1023,7 @@ router.post('/shout', async (req, res, next) => {
        draft-then-update round trip. Every query saved here is ~40 ms off the SHOUT button. */
     const startedAt = Date.now();
     const endsAt = timerSeconds > 0 ? startedAt + timerSeconds * 1000 : null;
-    const poll = await one(
+    const poll = await perf.timed('shout: create live round', () => one(
       `INSERT INTO polls (question, description, category, status, show_results, anonymous,
                           timer_seconds, remaining_ms, poll_type, player_name, player_id,
                           created_at, updated_at, created_by, started_at, ends_at, revision)
@@ -1040,13 +1041,13 @@ router.post('/shout', async (req, res, next) => {
         startedAt,
         endsAt
       ]
-    );
+    ));
 
     /* Exactly one player is ever on the block: anyone left behind (their round was closed
        without a price) is marked skipped, so the dashboard can never point at the wrong name. */
     /* One statement for the whole roster move: whoever was left on the block becomes skipped and
        this player goes on it. Two round trips became one. */
-    await q(
+    await perf.timed('shout: move the roster', () => q(
       `UPDATE auction_players
           SET status = CASE WHEN id = $1 THEN 'on_block' ELSE 'skipped' END,
               poll_id = CASE WHEN id = $1 THEN $2::int ELSE poll_id END,
@@ -1054,13 +1055,13 @@ router.post('/shout', async (req, res, next) => {
         WHERE (status = 'on_block' AND id <> $1 AND sold_lakh IS NULL)
            OR id = $1`,
       [player.id, poll.id, now]
-    );
+    ));
 
     // any other live round is paused so exactly one round is on screen
-    await q(
+    await perf.timed('shout: pause any other round', () => q(
       "UPDATE polls SET status = 'paused', updated_at = $1 WHERE status = 'active' AND id <> $2",
       [startedAt, poll.id]
-    );
+    ));
 
     /* Answer the button first, then tidy up. The admin panel paints the new player from this
        response; the audit log and the counters arrive with the next state push. */
@@ -1327,6 +1328,134 @@ router.get('/export/all-polls.csv', async (req, res, next) => {
       }
     }
     csvResponse(res, 'all-polls-report.csv', rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* ------------------------------- speed check ------------------------------- */
+
+/**
+ * GET /api/admin/diag — where is the time going, on THIS deployment?
+ *
+ * Everything here is measured live: the database round trip (three of them), the region the
+ * function is running in, whether the connection string is the pooled one, the timings of the
+ * shout/settle steps, and the per-route p50/p95 of what the browser has been waiting for.
+ */
+router.get('/diag', async (req, res, next) => {
+  try {
+    const t = () => process.hrtime.bigint();
+    const ms = (a) => Math.round(Number(process.hrtime.bigint() - a) / 1e6);
+
+    /* 1) raw database round trips */
+    const rtts = [];
+    for (let i = 0; i < 3; i++) {
+      const a = t();
+      await one('SELECT 1 AS ok');
+      rtts.push(ms(a));
+    }
+
+    /* 2) the query behind the audience screen */
+    let stateMs = null;
+    try {
+      const a = t();
+      await state.buildPublicState(null);
+      stateMs = ms(a);
+    } catch { /* reported as null */ }
+
+    const url = process.env.DATABASE_URL || '';
+    let dbHost = null;
+    let pooled = null;
+    try {
+      const u = new URL(url);
+      dbHost = u.hostname;
+      pooled = /-pooler/.test(u.hostname) || /pooler/i.test(u.hostname);
+    } catch { /* ignore */ }
+
+    /* Neon puts the database region in the hostname (…-pooler.us-east-2.aws.neon.tech), so we can
+       compare it with the region this function runs in and say plainly whether every query is
+       crossing an ocean. That mismatch is the single most expensive mistake on Vercel. */
+    const NEON_REGIONS = {
+      'us-east-1': 'iad1', 'us-east-2': 'iad1', 'us-west-2': 'pdx1', 'ca-central-1': 'yul1',
+      'eu-central-1': 'fra1', 'eu-west-1': 'dub1', 'eu-west-2': 'lhr1', 'eu-central-2': 'fra1',
+      'ap-south-1': 'bom1', 'ap-southeast-1': 'sin1', 'ap-southeast-2': 'syd1',
+      'ap-northeast-1': 'hnd1', 'ap-northeast-2': 'icn1', 'sa-east-1': 'gru1'
+    };
+    const neonAws = (dbHost || '').match(/\.([a-z]{2}-[a-z]+-\d)\.aws\.neon\.tech$/);
+    const neonRegion = neonAws ? neonAws[1] : null;
+    const fnRegion = process.env.VERCEL_REGION || process.env.AWS_REGION || 'local';
+    const suggestedRegion = neonRegion ? NEON_REGIONS[neonRegion] || null : null;
+    const regionMismatch = !!suggestedRegion && fnRegion !== 'local' && fnRegion !== suggestedRegion;
+
+    const summary = perf.summary();
+    const avgRtt = Math.round(rtts.reduce((a, b) => a + b, 0) / (rtts.length || 1));
+
+    /* 3) a verdict the host can read without knowing what p95 means */
+    const verdict = [];
+    if (avgRtt > 120) {
+      verdict.push(
+        `The database takes ${avgRtt} ms for a single round trip. That is a long way away — put the Vercel function in the same region as the Neon database.`
+      );
+    } else if (avgRtt > 60) {
+      verdict.push(`Database round trip is ${avgRtt} ms — usable, but a closer region would still help.`);
+    } else {
+      verdict.push(`Database round trip is ${avgRtt} ms — good.`);
+    }
+    if (regionMismatch) {
+      verdict.push(
+        `Your database lives in ${neonRegion} but this function runs in ${fnRegion}. Every single query crosses a region, which is exactly the 2-3 seconds you feel. Fix: add "regions": ["${suggestedRegion}"] to vercel.json and redeploy.`
+      );
+    } else if (suggestedRegion && fnRegion !== 'local') {
+      verdict.push(`Function and database are in the same region (${fnRegion}). Good.`);
+    }
+    if (pooled === false && /\.neon\.tech$/.test(dbHost || '')) {
+      verdict.push(
+        'DATABASE_URL looks like the DIRECT Neon connection, not the pooled one. The pooled string ends in "-pooler" and saves a TLS handshake on every request.'
+      );
+    }
+    if (stateMs != null && stateMs > 400) {
+      verdict.push(`A single /api/state read takes ${stateMs} ms — that is the audience screen's heartbeat.`);
+    }
+    const slow = summary.routes.filter((r) => r.p95 > 800);
+    for (const r of slow.slice(0, 4)) {
+      verdict.push(`${r.route} p95 ${r.p95} ms (${r.calls} calls) — slow endpoint.`);
+    }
+
+    res.json({
+      ok: true,
+      when: new Date().toISOString(),
+      runtime: {
+        node: process.version,
+        region: process.env.VERCEL_REGION || process.env.AWS_REGION || 'local',
+        memoryLimitMb: process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE || null,
+        uptimeSeconds: Math.round(process.uptime()),
+        cold: Date.now() - perf.STARTED_AT < 8000,
+        build: process.env.VERCEL_GIT_COMMIT_SHA ? String(process.env.VERCEL_GIT_COMMIT_SHA).slice(0, 7) : 'local'
+      },
+      database: {
+        host: dbHost,
+        pooled,
+        neonRegion,
+        functionRegion: fnRegion,
+        suggestedVercelRegion: suggestedRegion,
+        regionMismatch,
+        roundTripsMs: rtts,
+        avgRoundTripMs: avgRtt,
+        stateQueryMs: stateMs
+      },
+      transport: {
+        phone: config.phoneTransport,
+        screen: 'stream',
+        phoneActiveMs: config.phoneActiveMs,
+        phoneIdleMs: config.phoneIdleMs,
+        concurrentStreamsNote:
+          'Vercel Hobby allows ~10 concurrent invocations. Phones therefore poll (each request frees its slot) instead of holding a 45 s stream, which is what starved the SHOUT request.'
+      },
+      routes: summary.routes,
+      steps: summary.steps,
+      slowest: summary.slowest,
+      verdict
+    });
   } catch (err) {
     next(err);
   }

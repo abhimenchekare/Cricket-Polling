@@ -31,7 +31,9 @@ const ROUTES = [
   ['/admin/players', 'Auction list'],
   ['/admin-players', 'Auction list'],
   ['/admin/results', 'Results ledger'],
-  ['/admin-results', 'Results ledger']
+  ['/admin-results', 'Results ledger'],
+  ['/admin/speed', 'Speed check'],
+  ['/admin-speed', 'Speed check']
 ];
 
 let pass = 0;
@@ -40,6 +42,44 @@ const failures = [];
 
 (async () => {
   console.log(`\n🧭 Route check → ${BASE}\n${'='.repeat(54)}`);
+
+  /* ---------------- transport advertisement + the speed-check endpoint ---------------- */
+  try {
+    const meta = await (await fetch(BASE + '/api/meta')).json();
+    const t = meta && meta.polling && meta.polling.transport;
+    const good = !!t && (t.phone === 'poll' || t.phone === 'stream') && t.phoneActiveMs <= 2000;
+    if (good) {
+      pass++;
+      console.log(`  ✅ /api/meta transport     phone=${t.phone} active=${t.phoneActiveMs}ms idle=${t.phoneIdleMs}ms`);
+    } else {
+      fail++;
+      failures.push('/api/meta transport missing or too slow');
+      console.log('  ❌ /api/meta transport', JSON.stringify(t));
+    }
+  } catch (err) {
+    fail++;
+    failures.push(`/api/meta transport threw: ${err.message}`);
+    console.log('  ❌ /api/meta transport', err.message);
+  }
+
+  try {
+    const r = await fetch(BASE + '/api/admin/diag');
+    const body = await r.json().catch(() => ({}));
+    /* no token ⇒ must be refused, never leak internals to the audience */
+    const guarded = r.status === 401 || r.status === 403 || body.ok === false;
+    if (guarded) {
+      pass++;
+      console.log(`  ✅ /api/admin/diag         ${r.status} (admin only)`);
+    } else {
+      fail++;
+      failures.push('/api/admin/diag is not protected');
+      console.log(`  ❌ /api/admin/diag         ${r.status} — open to anyone`);
+    }
+  } catch (err) {
+    fail++;
+    failures.push(`/api/admin/diag threw: ${err.message}`);
+    console.log('  ❌ /api/admin/diag', err.message);
+  }
 
   for (const [path, expected] of ROUTES) {
     let status = 0;

@@ -56,7 +56,21 @@ router.get('/meta', async (req, res, next) => {
       },
       polling: {
         activeMs: config.pollIntervalActiveMs,
-        idleMs: config.pollIntervalIdleMs
+        idleMs: config.pollIntervalIdleMs,
+        /* v4.2.0 — how each screen should stay up to date.
+           Vercel Hobby allows ~10 concurrent invocations, and an open SSE stream holds one for its
+           whole lifetime. Twenty phones holding streams therefore starve the very request that
+           matters (SHOUT), which is what made the deployed site feel 2-3 s slow while a local run
+           was instant. Phones poll instead: each check is a ~100 ms request that frees its slot
+           immediately. The projector and the admin panel keep the stream — there are only one or
+           two of those. */
+        transport: {
+          phone: config.phoneTransport,
+          screen: 'stream',
+          phoneActiveMs: config.phoneActiveMs,
+          phoneIdleMs: config.phoneIdleMs,
+          phoneRecentMs: config.phoneRecentMs
+        }
       },
       // One shared price ladder so phone, admin and projector always agree.
       bid: {
