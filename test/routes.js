@@ -33,7 +33,9 @@ const ROUTES = [
   ['/admin/results', 'Results ledger'],
   ['/admin-results', 'Results ledger'],
   ['/admin/speed', 'Speed check'],
-  ['/admin-speed', 'Speed check']
+  ['/admin-speed', 'Speed check'],
+  ['/admin/data', 'Data'],
+  ['/admin-data', 'Data']
 ];
 
 let pass = 0;

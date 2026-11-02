@@ -211,9 +211,10 @@ const PLAYER = `UI Player ${Date.now() % 100000}`;
   console.log('\n📄 Other pages');
   const rp = await mobile.newPage();
   watch(rp, 'results');
+  /* v4.3.0: the audience has no results screen — the phone is bounced back to the live bid. */
   await rp.goto(`${BASE}/results`, { waitUntil: 'networkidle' });
-  await rp.waitForTimeout(1200);
-  ok('results page loads', await rp.locator('body').isVisible());
+  await rp.waitForTimeout(1500);
+  ok('the audience is kept away from /results', new URL(rp.url()).pathname !== '/results', rp.url());
   await shot(rp, '12-results-mobile.png');
 
   for (const [route, shotName, check] of [

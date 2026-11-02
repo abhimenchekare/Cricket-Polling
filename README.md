@@ -12,7 +12,18 @@ A complete live polling website for your office cricket auction, built to run **
 
 ---
 
-## What this app does (v4.2.0 — fast on the deployed site, not just on my laptop)
+## What this app does (v4.3.0 — auction day: audience sees bids only, admin sees no clutter, clean database)
+
+- **This version is for the real event.** On the phone there is **one screen and one job**: the live
+  bid slider. There is no results link, no results page, no history, no "see results" button —
+  the phone bounces away from `/results` if anyone tries it. Winners appear on the **big screen**.
+- **The admin dashboard is only what you touch on the day:** SHOUT, the round countdown, the sold
+  price, and the live report. The old *"Queue — Ready to run (6)"* list and *"Recently closed"* are
+  gone, and an empty dashboard no longer renders four "nothing to show" cards.
+- **A new database is empty.** No sample drafts are seeded any more. The only way a round exists is
+  that you pressed SHOUT.
+- **"Data & reset"** in the sidebar clears the rehearsal data in three sizes, each behind a typed
+  **CLEAR** confirmation (see §4k).
 
 An office-cricket-auction companion for the audience's phones.
 
@@ -714,6 +725,37 @@ A raw version of the same data is at `GET /api/admin/diag` (admin token required
 
 ---
 
+---
+
+## 4k. 🧹 "Today we go live — clear the practice data"
+
+Sidebar → **Data & reset** (`/admin/data`). It shows what is actually in the database right now
+(participants, guesses, rounds, live rounds, players, sold, queued) and then three buttons.
+Pick the **smallest** one that fixes your problem:
+
+| Button | Deletes | Keeps | Use it when |
+| --- | --- | --- | --- |
+| **1 · Clear rounds & guesses** | every round, every guess, every sold price; players go back to the top of the queue | your auction list, your participants, the event settings | you did a rehearsal round and want the slate clean, but your player list and the people who joined are real |
+| **2 · Clear audience too** | the above **and** every participant | your auction list, the event settings | rehearsal phones joined with test names and you want the room to join fresh |
+| **3 · Delete everything** | the above **and** the auction list | your admin account and password; settings go back to factory defaults | you want to paste a brand-new player list from scratch |
+
+Every one of them asks you to **type CLEAR** before it does anything — a mis-click cannot wipe the
+evening. Only an admin session can call it (`POST /api/admin/data/clear` answers 401 otherwise),
+and the host is never signed out by their own reset.
+
+**The morning-of sequence:**
+
+1. Deploy this version (or open your existing deployment and use *Data & reset* — it ships in 4.3.0).
+2. Sidebar → **Data & reset** → read the counts.
+3. Pick 1, 2 or 3 and type CLEAR.
+4. **Auction list** → paste the player list in bidding order (`Rohit Sharma, Batter, 2 Cr` per line).
+5. Dashboard → **SHOUT** for player one. That is the whole workflow for the next three hours.
+
+From a terminal on your own machine it is still `npm run reset -- --yes` — which now clears the
+auction list too, so paste again afterwards.
+
+---
+
 ## 5. Pages
 
 | Page | URL |
@@ -989,9 +1031,10 @@ npm run test:phone-fit             # the phone guess card fits one screen, with 
 npm run test:display               # the projector podium: 1st/2nd/3rd on the big screen
 npm run test:slider                # nobody else's vote moves your slider + the duck's batting loop
 npm run test:latency               # SHOUT <2 s and Lock in <1.5 s with a simulated Neon latency
+npm run test:data                  # no results on the phone, no queue in admin, the three clear scopes
 ```
 
-**Current results (v4.2.0, phones polled + 40 ms simulated Neon latency), 18 suites, 556 checks, 0 failures:**
+**Current results (v4.3.0), 19 suites, 590 checks, 0 failures:**
 
 | Suite | Checks | What it proves |
 | --- | --- | --- |
@@ -1010,9 +1053,10 @@ npm run test:latency               # SHOUT <2 s and Lock in <1.5 s with a simula
 | `ui-rapid` | 18 | 10s…2 min presets, remembered across reloads, used by the next SHOUT |
 | `ui-session` | 30 | admin sign-in/session/logout |
 | `live` | 10 | start→phone 811 ms, second phone 1229 ms, vote→phone 838 ms, sold price clears the phone 1136 ms — measured with phones polling |
-| `routes` | 25 | every page incl. `/admin/speed`, the advertised phone transport, and that `/api/admin/diag` is admin-only |
-| `config` | 38 | Vercel rewrites, serverless layout, no Socket.IO / QR / local-file DB |
-| `perf` | 3 | `/api/state` p95 32 ms, poll screen usable in 78 ms |
+| `routes` | 27 | every page incl. `/admin/speed`, the advertised phone transport, and that `/api/admin/diag` is admin-only |
+| `config` | 39 | Vercel rewrites, serverless layout, no Socket.IO / QR / local-file DB |
+| `perf` | 4 | `/api/state` p95, poll screen usable time, and the phone painting from its snapshot in 131 ms behind a 1.5 s-delayed API |
+| **`data`** | **30** | the audience has no results link or page, the dashboard has no queue, and the three clear scopes delete exactly what they promise |
 
 Screenshots of the browser runs land in `test/screenshots/` (`sh1-auction-list.png`,
 `sh2-shout-splash.png`, `lg1-ledger.png`, `lg2-settle-panel.png`, `sh6-confirm-fast.png`, …).

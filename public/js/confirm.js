@@ -10,7 +10,9 @@
   const choiceEl = document.getElementById('choice');
   const statsEl = document.getElementById('confirm-stats');
   const noteEl = document.getElementById('confirm-note');
-  const resultsLink = document.getElementById('results-link');
+  /* v4.3.0 — this button now only ever points back at the live bid; there is no results page
+     for the audience any more. */
+  const backLink = document.getElementById('back-link');
 
   function renderEmpty() {
     contentEl.innerHTML = `
@@ -37,8 +39,7 @@
         <div class="waiting-icon">⏳</div>
         <h1 class="confirm-title">No vote found</h1>
         <p class="muted" style="font-size:14.5px;margin-top:8px">This poll is still open — cast your vote to see the confirmation.</p>`;
-      resultsLink.textContent = 'Go to polls';
-      resultsLink.href = '/poll';
+      if (backLink) backLink.href = '/poll';
       document.getElementById('confirm-stats').innerHTML = '';
       noteEl.textContent = '';
       return;
@@ -69,18 +70,9 @@
       <div class="stat"><div class="stat-value">${poll.status === 'closed' ? 'Closed' : poll.status === 'paused' ? 'Paused' : 'Live'}</div><div class="stat-label">Poll status</div></div>
     `;
 
-    if (resultsVisible) {
-      resultsLink.textContent = 'See live results';
-      resultsLink.href = '/results';
-      noteEl.textContent = 'Results are visible now — tap above to view them.';
-    } else {
-      resultsLink.textContent = 'Previous results';
-      resultsLink.href = '/results';
-      noteEl.textContent =
-        poll.showResults === 'never'
-          ? 'The host keeps this poll private — results will not be published.'
-          : 'Results will appear automatically once the host reveals them.';
-    }
+    /* v4.3.0 — the audience phone has no results screen at all. The host reveals the
+       winners on the projector; the phone goes straight back to the live bid. */
+    noteEl.textContent = 'The host will announce the winners on the big screen.';
 
     if (!opts.silent) {
       confetti(1600);
@@ -157,9 +149,8 @@
       <div class="stat"><div class="stat-value">${Number(cached.totalVotes || 0)}</div><div class="stat-label">Guesses on this round</div></div>
       <div class="stat"><div class="stat-value">Live</div><div class="stat-label">Poll status</div></div>`;
 
-    noteEl.textContent = 'Results will appear automatically once the host reveals them.';
-    resultsLink.textContent = 'Back to the auction';
-    resultsLink.href = '/poll';
+    noteEl.textContent = 'The host will announce the winners on the big screen.';
+    if (backLink) backLink.href = '/poll';
 
     window.requestAnimationFrame(() => {
       confetti(1400);

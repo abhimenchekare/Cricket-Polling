@@ -45,6 +45,10 @@
     {
       "source": "/admin/speed",
       "destination": "/admin-speed"
+    },
+    {
+      "source": "/admin/data",
+      "destination": "/admin-data"
     }
   ],
   "headers": [

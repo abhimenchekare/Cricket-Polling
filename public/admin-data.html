@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Data & reset · Auction Control Room</title>
+<link rel="stylesheet" href="/css/theme.css?v=4.3.0" />
+<style>
+  .data-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); margin-top: 12px; }
+  .data-cell { border-radius: 14px; border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.03); padding: 12px 14px; }
+  .data-num { font: 900 clamp(22px, 3vw, 30px)/1 system-ui; letter-spacing: -.5px; }
+  .data-label { font: 700 11px/1 system-ui; letter-spacing: .12em; text-transform: uppercase; color: #8fa1bd; margin-bottom: 8px; }
+  .wipe { border-radius: 16px; border: 1px solid rgba(255,255,255,.1); padding: 16px 18px; margin-top: 14px; background: rgba(255,255,255,.02); }
+  .wipe h3 { margin: 0 0 6px; font-size: 17px; }
+  .wipe p { margin: 0 0 14px; color: #9fb0c9; font-size: 14px; line-height: 1.5; }
+  .wipe.danger { border-color: rgba(255,107,107,.35); background: rgba(255,107,107,.06); }
+  .wipe .keeps { font-size: 12.5px; color: #7f92ad; margin: 0 0 14px; }
+  .ok-strip { margin-top: 14px; padding: 12px 14px; border-radius: 12px; background: rgba(53,208,127,.12); border: 1px solid rgba(53,208,127,.35); color: #b6f0d0; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">🧹</div>
+      <div>
+        <div class="brand-name" data-event-name>Auction Control Room</div>
+        <div class="brand-sub">Data · clear the rehearsal, start clean</div>
+      </div>
+    </div>
+    <div class="row" style="gap:8px">
+      <a class="btn btn-ghost btn-sm" href="/admin">← Dashboard</a>
+      <button class="btn btn-ghost btn-sm" id="refresh">Refresh</button>
+    </div>
+  </header>
+
+  <section class="card" style="margin-top:16px">
+    <div class="card-head">
+      <div>
+        <div class="eyebrow">What is in the database right now</div>
+        <div class="card-title" style="margin-top:4px">Live counts</div>
+      </div>
+      <span class="pill pill-ghost" id="stamp">—</span>
+    </div>
+    <div class="data-grid" id="counts"></div>
+    <div id="healthy" style="margin-top:14px"></div>
+  </section>
+
+  <section class="card" style="margin-top:16px">
+    <div class="card-head">
+      <div>
+        <div class="eyebrow">Before the event</div>
+        <div class="card-title" style="margin-top:4px">Clear it out</div>
+      </div>
+    </div>
+    <p class="mute-sm" style="margin:8px 0 0">
+      Pick the smallest thing that fixes your problem. You will be asked to type <strong>CLEAR</strong>
+      before anything is deleted, and your admin password, event name and round length are never touched.
+    </p>
+
+    <div class="wipe">
+      <h3>1 · Clear rounds &amp; guesses</h3>
+      <p>Deletes every round, every guess and every sold price. Players go back to the top of the queue.</p>
+      <p class="keeps">Keeps: your auction list, participants, settings.</p>
+      <button class="btn btn-gold" data-scope="rounds">Clear rounds &amp; guesses</button>
+    </div>
+
+    <div class="wipe">
+      <h3>2 · Clear audience too</h3>
+      <p>Everything above, and every participant is removed — for when rehearsal phones joined with
+        test names and you want the room to join fresh with their real ones.</p>
+      <p class="keeps">Keeps: your auction list, settings.</p>
+      <button class="btn btn-gold" data-scope="audience">Clear rounds, guesses &amp; participants</button>
+    </div>
+
+    <div class="wipe danger">
+      <h3>3 · Delete everything</h3>
+      <p>A completely empty app: no rounds, no guesses, no participants and no auction list. Use this
+        only if you want to paste a brand-new player list from scratch.</p>
+      <p class="keeps">Keeps: your admin account and password.</p>
+      <button class="btn btn-danger" data-scope="everything">Delete everything</button>
+    </div>
+  </section>
+
+  <p class="mute-sm center" style="margin-top:18px">
+    Same thing from a terminal: <code>npm run reset -- --yes</code> (local database only).
+  </p>
+</div>
+
+<script src="/js/app.js?v=4.3.0"></script>
+<script src="/js/admin-shell.js?v=4.3.0"></script>
+<script>
+(function () {
+  'use strict';
+  const { API, escapeHtml, toast, confirmDialog } = window.App;
+  const countsEl = document.getElementById('counts');
+  const healthyEl = document.getElementById('healthy');
+  const stampEl = document.getElementById('stamp');
+
+  const COPY = {
+    rounds: {
+      title: 'Clear every round and guess?',
+      body: 'Every round, guess and sold price is deleted and your players go back to the top of the queue. Your auction list stays.',
+      button: 'Clear rounds & guesses',
+      done: 'Rounds cleared.'
+    },
+    audience: {
+      title: 'Clear rounds, guesses and participants?',
+      body: 'Everything from the rehearsal goes: rounds, guesses, sold prices and every participant. Your auction list stays.',
+      button: 'Clear audience data',
+      done: 'Audience cleared.'
+    },
+    everything: {
+      title: 'Delete absolutely everything?',
+      body: 'This empties the app: rounds, guesses, participants <strong>and</strong> the auction list. Only your admin account survives.',
+      button: 'Delete everything',
+      done: 'Database emptied.'
+    }
+  };
+
+  function cell(label, value) {
+    return `<div class="data-cell"><div class="data-label">${label}</div><div class="data-num">${value}</div></div>`;
+  }
+
+  async function load() {
+    try {
+      const d = await API.get('/api/admin/data');
+      const c = d.counts || {};
+      countsEl.innerHTML = [
+        cell('Participants', c.participants ?? 0),
+        cell('Guesses', c.guesses ?? 0),
+        cell('Rounds', c.rounds ?? 0),
+        cell('Rounds live now', c.liveRounds ?? 0),
+        cell('Players on the list', c.players ?? 0),
+        cell('Sold', c.sold ?? 0),
+        cell('Still queued', c.queued ?? 0)
+      ].join('');
+      stampEl.textContent = new Date().toLocaleTimeString();
+
+      const clean = !c.rounds && !c.guesses && !c.participants;
+      healthyEl.innerHTML = clean
+        ? '<div class="ok-strip">✅ This database is completely clean — nothing left over from a rehearsal.</div>'
+        : c.liveRounds
+          ? '<div class="ok-strip" style="background:rgba(255,209,102,.12);border-color:rgba(255,209,102,.35);color:#ffe6a8">⚠️ A round is live right now. Clearing will end it.</div>'
+          : '';
+    } catch (err) {
+      countsEl.innerHTML = `<div class="mute-sm">${escapeHtml(err.message || 'Could not read the database')}</div>`;
+    }
+  }
+
+  async function wipe(scope) {
+    const copy = COPY[scope];
+    const ok = await confirmDialog({
+      title: copy.title,
+      message: `<p style="margin:0 0 10px;line-height:1.5">${copy.body}</p>
+                <p style="margin:0;color:#9fb0c9;font-size:13.5px">Type <strong>CLEAR</strong> to confirm.</p>`,
+      confirmText: copy.button,
+      danger: true,
+      requireText: { expect: 'CLEAR', placeholder: 'Type CLEAR' }
+    });
+    if (!ok) return;
+
+    const buttons = document.querySelectorAll('[data-scope]');
+    buttons.forEach((b) => (b.disabled = true));
+    try {
+      const res = await API.post('/api/admin/data/clear', { scope, confirm: 'CLEAR' });
+      toast(res.message || copy.done, 'ok', 6000);
+      await load();
+    } catch (err) {
+      toast(err.message || 'Could not clear the data', 'err', 6000);
+    } finally {
+      buttons.forEach((b) => (b.disabled = false));
+    }
+  }
+
+  document.querySelectorAll('[data-scope]').forEach((btn) =>
+    btn.addEventListener('click', () => wipe(btn.dataset.scope))
+  );
+  document.getElementById('refresh').addEventListener('click', load);
+  load();
+})();
+</script>
+</body>
+</html>

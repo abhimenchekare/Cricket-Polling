@@ -17,7 +17,6 @@
     kpis: document.getElementById('dash-kpis'),
     live: document.getElementById('live-control'),
     results: document.getElementById('dash-results'),
-    queue: document.getElementById('dash-queue'),
     quick: document.getElementById('dash-quick'),
     activity: document.getElementById('dash-activity')
   };
@@ -46,7 +45,6 @@
     renderKpis(state);
     renderLive(state);
     renderResults(state);
-    renderQueue(state);
     renderQuick(state);
     renderActivity(state);
     UI.animateBars(document);
@@ -409,30 +407,13 @@
   function renderLive(state) {
     const live = state.polls.find((p) => p.status === 'active') || state.polls.find((p) => p.status === 'paused');
     if (!live) {
-      const nextDraft = state.polls.filter((p) => p.status === 'draft').slice(-1)[0];
-      els.live.innerHTML = `
-        <div class="card card-hero">
-          <div class="card-head">
-            <div>
-              <div class="eyebrow">Live control</div>
-              <div class="card-title" style="margin-top:4px">No poll is running</div>
-            </div>
-            <span class="pill pill-draft">IDLE</span>
-          </div>
-          <p class="muted" style="font-size:14px">
-            ${nextDraft ? 'Start your next poll whenever the room is ready.' : 'Create a poll to get started.'}
-          </p>
-          <div class="poll-actions" style="margin-top:14px">
-            ${nextDraft ? `<button class="btn btn-primary" data-start="${nextDraft.id}">▶ Start: ${escapeHtml(nextDraft.question.slice(0, 38))}${nextDraft.question.length > 38 ? '…' : ''}</button>` : ''}
-            <a class="btn btn-ghost" href="/admin-polls">+ New poll</a>
-            <a class="btn btn-ghost" href="/display" target="_blank" rel="noopener">🖥 Big screen</a>
-          </div>
-        </div>`;
-      els.live.querySelectorAll('[data-start]').forEach((btn) =>
-        btn.addEventListener('click', () => UI.handleAction('start', btn.dataset.start))
-      );
+      /* v4.3.0 — no empty "No poll is running / Create a poll" card. The SHOUT panel above is the
+         one control the host uses; everything else on this page is about a round that exists. */
+      els.live.innerHTML = '';
+      els.live.classList.add('hidden');
       return;
     }
+    els.live.classList.remove('hidden');
 
     const isPaused = live.status === 'paused';
     els.live.innerHTML = `
@@ -526,9 +507,12 @@
     // Prefer the live poll, then a paused one, then the most recently closed
     const live = state.polls.find((p) => p.status === 'active') || state.polls.find((p) => p.status === 'paused') || state.polls.find((p) => p.status === 'closed');
     if (!live) {
-      els.results.innerHTML = `<div class="card"><div class="card-head"><div><div class="eyebrow">Results</div><div class="card-title" style="margin-top:4px">Nothing to show</div></div></div><div class="empty">Start a poll to see live results.</div></div>`;
+      /* Nothing shouted yet — an empty card is noise on the morning of the auction. */
+      els.results.innerHTML = '';
+      els.results.classList.add('hidden');
       return;
     }
+    els.results.classList.remove('hidden');
     els.results.innerHTML = `
       <div class="card">
         <div class="card-head">
@@ -546,51 +530,6 @@
         </div>
       </div>`;
     UI.bindActions(els.results);
-  }
-
-  function renderQueue(state) {
-    const drafts = state.polls.filter((p) => p.status === 'draft').slice(0, 4);
-    const recent = state.polls.filter((p) => p.status === 'closed').slice(0, 3);
-    els.queue.innerHTML = `
-      <div class="card">
-        <div class="card-head">
-          <div>
-            <div class="eyebrow">Queue</div>
-            <div class="card-title" style="margin-top:4px">Ready to run (${state.polls.filter((p) => p.status === 'draft').length})</div>
-          </div>
-          <a class="btn btn-ghost btn-sm" href="/admin-polls">Manage</a>
-        </div>
-        ${drafts.length
-          ? drafts
-              .map(
-                (p) => `
-          <div class="poll-item">
-            <div class="poll-item-q" style="font-size:14.5px;margin-bottom:8px">${escapeHtml(p.question)}</div>
-            <div class="poll-item-meta">${UI.metaChips(p)}</div>
-            <div class="poll-actions">
-              <button class="btn btn-primary" data-start="${p.id}">▶ Start</button>
-              <a class="btn btn-ghost" href="/admin-polls?edit=${p.id}">✏️ Edit</a>
-            </div>
-          </div>`
-              )
-              .join('')
-          : '<div class="empty">No draft polls. Create one to get ready.</div>'}
-        <hr class="divider" />
-        <div class="mute-sm" style="margin-bottom:8px">Recently closed</div>
-        ${recent.length
-          ? recent
-              .map(
-                (p) => `<div class="row-between" style="padding:7px 0;font-size:13px">
-                  <span class="truncate" style="color:var(--text-dim)">${escapeHtml(p.question)}</span>
-                  <span class="pill pill-ghost">${p.totalVotes}</span>
-                </div>`
-              )
-              .join('')
-          : '<div class="mute-sm">No closed polls yet.</div>'}
-      </div>`;
-    els.queue.querySelectorAll('[data-start]').forEach((btn) =>
-      btn.addEventListener('click', () => UI.handleAction('start', btn.dataset.start))
-    );
   }
 
   function renderQuick(state) {
@@ -625,6 +564,7 @@
           </div>
         </div>
         <a class="btn btn-ghost" href="/admin-players" style="width:100%">Open the auction list</a>
+        <a class="btn btn-ghost" href="/admin-polls" style="width:100%;margin-top:8px">Create a round by hand (optional)</a>
       </div>
 
       <div class="card">
@@ -635,7 +575,7 @@
           </div>
         </div>
         <div class="grid-3">
-          <a class="btn btn-primary" href="/admin-polls">+ Create poll</a>
+          <a class="btn btn-ghost" href="/admin-players">📋 Auction list</a>
           <a class="btn btn-ghost" href="/display" target="_blank" rel="noopener">🖥 Big screen</a>
           <button class="btn btn-ghost" id="show-qr">🔗 Join link</button>
           <a class="btn btn-ghost" href="/admin-participants">👥 Participants</a>

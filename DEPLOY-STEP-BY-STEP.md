@@ -566,6 +566,25 @@ npm run dev                        # run locally at http://localhost:4000
 
 ---
 
+## Going live today: clear the practice data (v4.3.0)
+
+Deploy this version, sign in to the admin panel, then:
+
+1. **Sidebar → Data & reset** (`/admin/data`). It lists what is really in the database.
+2. Choose the smallest clear that fits:
+   - **Clear rounds & guesses** — keeps your auction list and the people who joined.
+   - **Clear rounds, guesses & participants** — also removes every joined phone.
+   - **Delete everything** — also removes the auction list (admin password survives).
+3. Type **CLEAR** in the box and confirm.
+4. **Auction list** → paste your players in bidding order, one per line
+   (`Rohit Sharma, Batter, 2 Cr`).
+5. Dashboard → **SHOUT**. From here the auction is one button per player.
+
+There are no sample polls in a new database any more, and the dashboard has no queue list to
+distract you. The audience phone has no results link at all — winners are shown on the big screen.
+
+---
+
 ## The 3-minute performance check (v4.2.0) — do this after deploying
 
 The app measures itself on the deployment, so you never have to guess again.

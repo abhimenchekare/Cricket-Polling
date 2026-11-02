@@ -240,8 +240,13 @@ function init() {
       console.log(`[db] Created admin account "${username}"`);
     }
 
+    /* v4.3.0 — no sample polls any more.
+       The old build seeded six multiple-choice drafts into an empty database, which is exactly
+       the "Queue — Ready to run" list the host does not want on the morning of a real auction.
+       Rounds are created by SHOUT and by nothing else. Set SEED_SAMPLE_POLLS=1 if you ever want
+       the demo drafts back. */
     const pollCount = Number(await scalar('SELECT COUNT(*)::int AS c FROM polls'));
-    if (pollCount === 0) {
+    if (pollCount === 0 && process.env.SEED_SAMPLE_POLLS === '1') {
       const now = Date.now();
       for (const poll of SAMPLE_POLLS) {
         const row = await one(

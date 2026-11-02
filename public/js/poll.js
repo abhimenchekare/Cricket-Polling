@@ -432,11 +432,7 @@
             <h3 style="font-size:20px">Your guess is locked in</h3>
             <div class="bid-locked-value">${escapeHtml(mineLabel)}</div>
             <p class="muted" style="margin-top:6px;font-size:14px">One guess per participant per player.</p>
-            <p class="mute-sm" style="margin-top:14px">${
-              p.resultsVisible
-                ? 'The hammer price is in — winners are below'
-                : 'The host will enter the sold price after the bidding ends'
-            }</p>
+            <p class="mute-sm" style="margin-top:14px">The host is taking bids — watch the big screen for the result.</p>
           </div>
         </div>`;
       return;
@@ -446,9 +442,7 @@
       els.pollArea.innerHTML = `
         <div class="card card-hero poll-card">${head}
           <div class="locked"><span style="font-size:18px">🔒</span>
-            <div><strong>Guessing is closed for this player.</strong><br />${
-              p.resultsVisible ? 'Final standings are below.' : 'The host has not entered the sold price yet.'
-            }</div>
+            <div><strong>Guessing is closed for this player.</strong><br />Next player coming up.</div>
           </div>
         </div>`;
       return;

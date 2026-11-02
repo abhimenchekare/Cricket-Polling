@@ -1,8 +1,8 @@
 'use strict';
 
 const express = require('express');
-const { q, one, logActivity } = require('../db');
-const { allSettings, setSetting } = require('../settings');
+const { q, one, logActivity, DEFAULT_SETTINGS } = require('../db');
+const { allSettings, setSetting, invalidateCache: setSettingCacheInvalid } = require('../settings');
 const auth = require('../auth');
 const state = require('../state');
 const perf = require('../perf');
@@ -1455,6 +1455,121 @@ router.get('/diag', async (req, res, next) => {
       steps: summary.steps,
       slowest: summary.slowest,
       verdict
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* Data — what is in the database, and clearing it before the event    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * GET /api/admin/data
+ * One small, honest summary of what the database holds right now. The host runs this on the
+ * morning of the auction to be sure there is no rehearsal data left over.
+ */
+router.get('/data', async (req, res, next) => {
+  try {
+    const row = (
+      await one(
+        `SELECT (SELECT COUNT(*)::int FROM participants)      AS participants,
+                (SELECT COUNT(*)::int FROM votes)             AS guesses,
+                (SELECT COUNT(*)::int FROM polls)             AS rounds,
+                (SELECT COUNT(*)::int FROM polls WHERE status IN ('active','paused')) AS live_rounds,
+                (SELECT COUNT(*)::int FROM auction_players)   AS players,
+                (SELECT COUNT(*)::int FROM auction_players WHERE status = 'sold') AS sold,
+                (SELECT COUNT(*)::int FROM auction_players WHERE status = 'queued') AS queued,
+                (SELECT COUNT(*)::int FROM activity_log)      AS activity`
+      )
+    ) || {};
+    res.json({
+      ok: true,
+      counts: {
+        participants: row.participants || 0,
+        guesses: row.guesses || 0,
+        rounds: row.rounds || 0,
+        liveRounds: row.live_rounds || 0,
+        players: row.players || 0,
+        sold: row.sold || 0,
+        queued: row.queued || 0,
+        activity: row.activity || 0
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/admin/data/clear  { scope, confirm }
+ *
+ *   scope = 'rounds'      every round and guess; the auction list stays, sold prices are cleared
+ *   scope = 'audience'    the above, plus every participant (a clean room before the event)
+ *   scope = 'everything'  the above, plus the auction list itself — back to an empty app
+ *
+ * The admin account, the event settings and the current admin session always survive, so the
+ * host is never logged out of their own event by pressing this.
+ * Typing CLEAR is required; a plain "are you sure" click is not enough for a destructive action.
+ */
+router.post('/data/clear', async (req, res, next) => {
+  try {
+    const scope = String(req.body?.scope || '');
+    const confirm = String(req.body?.confirm || '').trim().toUpperCase();
+    if (!['rounds', 'audience', 'everything'].includes(scope)) {
+      return res.status(400).json({ error: 'Unknown scope. Use rounds, audience or everything.' });
+    }
+    if (confirm !== 'CLEAR') {
+      return res.status(400).json({ error: 'Type CLEAR to confirm this.', needsConfirm: true });
+    }
+
+    /* Rounds, options and guesses always go — a round without its guesses is meaningless.
+       DELETE, not TRUNCATE ... CASCADE: auction_players.poll_id references polls(id), so a
+       cascading truncate would quietly empty the host's auction list as well. */
+    await q('DELETE FROM votes');
+    await q('DELETE FROM options');
+    await q('DELETE FROM polls');
+    await q(
+      "UPDATE auction_players SET status = 'queued', poll_id = NULL, sold_lakh = NULL, sold_at = NULL, shouted_at = NULL"
+    );
+
+    if (scope === 'audience' || scope === 'everything') {
+      await q('DELETE FROM participant_sessions');
+      await q('DELETE FROM participants');
+    }
+    if (scope === 'everything') {
+      await q('DELETE FROM auction_players');
+      await q('DELETE FROM activity_log');
+      /* Settings go back to factory defaults rather than disappearing — without this the
+         running process loses "joins are open" and the join page locks itself. */
+      const keys = Object.keys(DEFAULT_SETTINGS);
+      await q(
+        `INSERT INTO settings (key, value)
+         SELECT * FROM unnest($1::text[], $2::text[])
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        [keys, keys.map((k) => String(DEFAULT_SETTINGS[k]))]
+      );
+      setSettingCacheInvalid();
+    }
+
+    const label =
+      scope === 'rounds'
+        ? 'Cleared every round and guess (auction list kept)'
+        : scope === 'audience'
+          ? 'Cleared every round, guess and participant'
+          : 'Cleared everything except the admin account';
+    await logActivity('data.clear', label, req.admin.username);
+
+    res.json({
+      ok: true,
+      scope,
+      message:
+        scope === 'rounds'
+          ? 'All rounds and guesses are gone. Your auction list is untouched and every player is back to queued.'
+          : scope === 'audience'
+            ? 'All rounds, guesses and participants are gone. Your auction list is untouched.'
+            : 'Everything is gone except your admin account and password. Paste your auction list again to begin.'
     });
   } catch (err) {
     next(err);
